@@ -524,6 +524,7 @@ end
 
 M.search = function()
   reset()
+
   vim.ui.input({ prompt = '书名' }, function(input)
     if input == nil then
       return
@@ -567,29 +568,32 @@ M.search = function()
   end)
 end
 
-function M.star()
-  if current_book == nil then
+---@param book BookItem?
+function M.star(book)
+  book = book or current_book
+  if book == nil then
     warn('没有正在阅读的小说，无法收藏')
     return
   end
   for i, r in ipairs(bookshelf) do
-    if vim.deep_equal(current_book, r.info) then
-      info('取消收藏 ' .. current_book.title .. ' - ' .. current_book.author)
+    if vim.deep_equal(book, r.info) then
+      info('取消收藏 ' .. book.title .. ' - ' .. book.author)
       table.remove(bookshelf, i)
       return
     end
   end
-  info('收藏 ' .. current_book.title .. ' - ' .. current_book.author)
+  info('收藏 ' .. book.title .. ' - ' .. book.author)
   bookshelf[#bookshelf + 1] = {
-    info = current_book,
+    info = book,
     last_read = current_chap_index(),
   }
 end
 
 function M.bookshelf()
-  pickers.new({}, {
-    prompt_title = '书架',
-    finder = finders.new_table {
+  reset()
+
+  local function new_finder()
+    return finders.new_table {
       results = bookshelf,
       entry_maker = function(entry)
         local display = entry.info.title .. ' - ' .. entry.info.author
@@ -599,21 +603,45 @@ function M.bookshelf()
           ordinal = display,
         }
       end,
-    },
-    sorter = conf.generic_sorter {},
-    attach_mappings = function(prompt_bufnr, _)
-      actions.select_default:replace(function()
-        actions.close(prompt_bufnr)
-        local value = action_state.get_selected_entry().value
-        current_book = value.info
-        fetch_toc(function()
-          current_chap = current_toc[value.last_read]
-          cook_content()
+    }
+  end
+
+  local function unstar(picker_bufnr)
+    local selection = action_state.get_selected_entry().value
+    local picker = action_state.get_current_picker(picker_bufnr)
+    if selection then
+      M.star(selection.info)
+      picker:refresh(new_finder(), { reset_prompt = true })
+    end
+  end
+
+  pickers
+    .new({}, {
+      prompt_title = '书架 | <CR> 打开 | <C-d> 取消收藏 (i) | dd 取消收藏 (n)',
+      finder = new_finder(),
+      sorter = conf.generic_sorter {},
+      attach_mappings = function(prompt_bufnr, map)
+        actions.select_default:replace(function()
+          actions.close(prompt_bufnr)
+          local value = action_state.get_selected_entry().value
+          current_book = value.info
+          fetch_toc(function()
+            current_chap = current_toc[value.last_read]
+            cook_content()
+          end)
         end)
-      end)
-      return true
-    end,
-  }):find()
+
+        map({ 'n' }, 'dd', function()
+          unstar(prompt_bufnr)
+        end)
+        map({ 'i' }, '<C-d>', function()
+          unstar(prompt_bufnr)
+        end)
+
+        return true
+      end,
+    })
+    :find()
 end
 
 return M
