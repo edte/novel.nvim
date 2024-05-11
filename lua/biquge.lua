@@ -33,21 +33,26 @@ local current_position = nil
 
 local current_extmark_id = -1
 
+---@class BookRecord
+---@field info BookItem
+---@field last_read integer
+---
+---@type BookRecord[]
+local bookshelf = nil
+
 ---@class Config
 ---@field width integer
 ---@field height integer
 ---@field hlgroup string
+---@field bookshelf string
 ---
 ---@type Config
 local config = {
   width = 30,
   height = 10,
   hlgroup = 'Comment',
+  bookshelf = vim.fs.joinpath(vim.fn.stdpath('data'), 'biquge_bookshelf.json'),
 }
-
-M.setup = function(opts)
-  config = vim.tbl_extend('force', config, opts)
-end
 
 local function notify(msg, level)
   vim.notify(msg, level, { title = 'biquge.nvim' })
@@ -63,6 +68,53 @@ end
 
 local function error(msg)
   notify(msg, vim.log.levels.ERROR)
+end
+
+local function current_chap_index()
+  for i, item in ipairs(current_toc) do
+    if vim.deep_equal(item, current_chap) then
+      return i
+    end
+  end
+  return -1
+end
+
+local function save()
+  if current_book ~= nil then
+    for _, r in ipairs(bookshelf) do
+      if vim.deep_equal(current_book, r.info) then
+        r.last_read = current_chap_index()
+        return
+      end
+    end
+  end
+end
+
+M.setup = function(opts)
+  config = vim.tbl_extend('force', config, opts)
+
+  if vim.fn.filereadable(config.bookshelf) == 1 then
+    local text = {}
+    local f = io.open(config.bookshelf)
+    for line in f:lines() do
+      text[#text + 1] = line
+    end
+    bookshelf = vim.json.decode(table.concat(text))
+    f:close()
+  else
+    bookshelf = {}
+  end
+
+  vim.api.nvim_create_autocmd('VimLeave', {
+    callback = function()
+      save()
+
+      local f = io.open(config.bookshelf, 'w+')
+      f:write(vim.json.encode(bookshelf))
+      f:close()
+    end,
+    group = vim.api.nvim_create_augroup('biquge_persisted', {}),
+  })
 end
 
 ---@param text string
@@ -372,12 +424,11 @@ function M.toggle()
 end
 
 local function jump_chap(offset)
-  local index = -1
-  for i, item in ipairs(current_toc) do
-    if item.title == current_chap.title and item.link == current_chap.link then
-      index = i
-    end
+  if current_toc == nil then
+    warn('没有正在阅读的小说，请先搜索想要阅读的小说')
+    return
   end
+  local index = current_chap_index()
   local target = index + offset
   if target < 1 or target > #current_toc then
     return
@@ -409,11 +460,8 @@ function M.scroll(offset)
   M.show()
 end
 
-function M.toc()
-  if current_book == nil then
-    warn('没有正在阅读的小说，请先搜索想要阅读的小说')
-    return
-  end
+---@param callback fun()
+local function fetch_toc(callback)
   vim.system(
     {
       'curl',
@@ -423,40 +471,52 @@ function M.toc()
     { text = true },
     vim.schedule_wrap(function(obj)
       current_toc = get_toc(obj.stdout)
-      pickers
-        .new({}, {
-          prompt_title = current_book.title .. ' - 目录',
-          finder = finders.new_table {
-            results = current_toc,
-            entry_maker = function(entry)
-              return {
-                value = entry,
-                display = entry.title,
-                ordinal = entry.title,
-              }
-            end,
-          },
-          sorter = conf.generic_sorter {},
-          attach_mappings = function(prompt_bufnr, _)
-            actions.select_default:replace(function()
-              actions.close(prompt_bufnr)
-              current_chap = action_state.get_selected_entry().value
-              cook_content()
-            end)
-            return true
-          end,
-        })
-        :find()
+      callback()
     end)
   )
 end
 
+function M.toc()
+  if current_book == nil then
+    warn('没有正在阅读的小说，请先搜索想要阅读的小说')
+    return
+  end
+  fetch_toc(function()
+    pickers
+      .new({}, {
+        prompt_title = current_book.title .. ' - 目录',
+        finder = finders.new_table {
+          results = current_toc,
+          entry_maker = function(entry)
+            return {
+              value = entry,
+              display = entry.title,
+              ordinal = entry.title,
+            }
+          end,
+        },
+        sorter = conf.generic_sorter {},
+        attach_mappings = function(prompt_bufnr, _)
+          actions.select_default:replace(function()
+            actions.close(prompt_bufnr)
+            current_chap = action_state.get_selected_entry().value
+            cook_content()
+          end)
+          return true
+        end,
+      })
+      :find()
+  end)
+end
+
 local function reset()
   M.hide()
+  save()
+
   current_book = nil
-  current_toc = {}
+  current_toc = nil
   current_chap = nil
-  current_content = {}
+  current_content = nil
   begin_index, end_index = -1, -1
   current_position = nil
   current_extmark_id = -1
@@ -505,6 +565,55 @@ M.search = function()
       end)
     )
   end)
+end
+
+function M.star()
+  if current_book == nil then
+    warn('没有正在阅读的小说，无法收藏')
+    return
+  end
+  for i, r in ipairs(bookshelf) do
+    if vim.deep_equal(current_book, r.info) then
+      info('取消收藏 ' .. current_book.title .. ' - ' .. current_book.author)
+      table.remove(bookshelf, i)
+      return
+    end
+  end
+  info('收藏 ' .. current_book.title .. ' - ' .. current_book.author)
+  bookshelf[#bookshelf + 1] = {
+    info = current_book,
+    last_read = current_chap_index(),
+  }
+end
+
+function M.bookshelf()
+  pickers.new({}, {
+    prompt_title = '书架',
+    finder = finders.new_table {
+      results = bookshelf,
+      entry_maker = function(entry)
+        local display = entry.info.title .. ' - ' .. entry.info.author
+        return {
+          value = entry,
+          display = display,
+          ordinal = display,
+        }
+      end,
+    },
+    sorter = conf.generic_sorter {},
+    attach_mappings = function(prompt_bufnr, _)
+      actions.select_default:replace(function()
+        actions.close(prompt_bufnr)
+        local value = action_state.get_selected_entry().value
+        current_book = value.info
+        fetch_toc(function()
+          current_chap = current_toc[value.last_read]
+          cook_content()
+        end)
+      end)
+      return true
+    end,
+  }):find()
 end
 
 return M
