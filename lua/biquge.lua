@@ -54,22 +54,13 @@ local config = {
   bookshelf = vim.fs.joinpath(vim.fn.stdpath('data'), 'biquge_bookshelf.json'),
 }
 
+---@param msg string
+---@param level integer
 local function notify(msg, level)
   vim.notify(msg, level, { title = 'biquge.nvim' })
 end
 
-local function info(msg)
-  notify(msg, vim.log.levels.INFO)
-end
-
-local function warn(msg)
-  notify(msg, vim.log.levels.WARN)
-end
-
-local function error(msg)
-  notify(msg, vim.log.levels.ERROR)
-end
-
+---@return integer
 local function current_chap_index()
   for i, item in ipairs(current_toc) do
     if vim.deep_equal(item, current_chap) then
@@ -94,13 +85,8 @@ M.setup = function(opts)
   config = vim.tbl_extend('force', config, opts)
 
   if vim.fn.filereadable(config.bookshelf) == 1 then
-    local text = {}
-    local f = io.open(config.bookshelf)
-    for line in f:lines() do
-      text[#text + 1] = line
-    end
+    local text = vim.fn.readfile(config.bookshelf)
     bookshelf = vim.json.decode(table.concat(text))
-    f:close()
   else
     bookshelf = {}
   end
@@ -108,12 +94,9 @@ M.setup = function(opts)
   vim.api.nvim_create_autocmd('VimLeave', {
     callback = function()
       save()
-
-      local f = io.open(config.bookshelf, 'w+')
-      f:write(vim.json.encode(bookshelf))
-      f:close()
+      vim.fn.writefile({ vim.json.encode(bookshelf) }, config.bookshelf)
     end,
-    group = vim.api.nvim_create_augroup('biquge_persisted', {}),
+    group = vim.api.nvim_create_augroup('biquge_bookshelf', {}),
   })
 end
 
@@ -128,31 +111,26 @@ local function get_content(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, 'html')
   local root = parser:parse()[1]:root()
-  local q = vim.treesitter.query.parse(
+  local query = vim.treesitter.query.parse(
     'html',
     [[
 (
-  (start_tag
-    (tag_name) @tag_name
-    (attribute
-      (attribute_name) @attr_name
-      (quoted_attribute_value
-        (attribute_value) @attr_value))) @start_tag
-  (#eq? @tag_name "div")
-  (#eq? @attr_name "id")
-  (#eq? @attr_value "content"))
+ (element
+   (start_tag
+     (tag_name) @tag_name
+     (attribute
+       (attribute_name) @attr_name
+       (quoted_attribute_value) @attr_value))
+   (text) @text)
+ (#eq? @tag_name "div")
+ (#eq? @attr_name "id")
+ (#eq? @attr_value "\"content\""))
   ]]
   )
-  for id, node in q:iter_captures(root, normalized) do
-    local capture = q.captures[id]
-    if capture == 'start_tag' then
-      local sibling = node
-      repeat
-        sibling = sibling:next_sibling()
-      until sibling == nil or sibling:type() == 'text'
-      if sibling then
-        return vim.split(vim.treesitter.get_node_text(sibling, normalized), '\n')
-      end
+  for id, node in query:iter_captures(root, normalized) do
+    local capture = query.captures[id]
+    if capture == 'text' then
+      return vim.split(vim.treesitter.get_node_text(node, normalized), '\n')
     end
   end
   return {}
@@ -168,68 +146,51 @@ local function get_toc(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, 'html')
   local root = parser:parse()[1]:root()
-
-  local start_query = vim.treesitter.query.parse(
+  local query = vim.treesitter.query.parse(
     'html',
     [[
 (
-  (start_tag (tag_name) @tag_name) @start_tag
-  (#eq? @tag_name "dl"))
+ (element
+   (start_tag
+     (tag_name) @div_tag_name
+     (attribute
+       (attribute_name) @id_attr_name
+       (quoted_attribute_value) @id_attr_value))
+   (element
+     (element
+       (element
+         (start_tag
+           (tag_name) @a_tag_name
+           (attribute
+             (attribute_name) @href_attr_name
+             (quoted_attribute_value
+               (attribute_value) @link))
+           (attribute
+             (attribute_name) @title_attr_name
+             (quoted_attribute_value
+               (attribute_value) @title)))))))
+ (#eq? @div_tag_name "div")
+ (#eq? @id_attr_name "id")
+ (#eq? @id_attr_value "\"list\"")
+ (#eq? @a_tag_name "a")
+ (#eq? @href_attr_name "href")
+ (#eq? @title_attr_name "title"))
   ]]
   )
-
-  ---@type TSNode
-  local dl_tag
-  for id, node in start_query:iter_captures(root, normalized) do
-    local capture = start_query.captures[id]
-    if capture == 'start_tag' then
-      dl_tag = node
-      break
-    end
-  end
-
-  if dl_tag == nil then
-    return {}
-  end
-
-  local item_query = vim.treesitter.query.parse(
-    'html',
-    [[
-(
-  (start_tag
-    (tag_name) @tag_name
-    (attribute
-      (attribute_name) @href_name
-      (quoted_attribute_value
-        (attribute_value) @href_value))
-    (attribute
-      (attribute_name) @title_name
-      (quoted_attribute_value
-        (attribute_value) @title_value)))
-  (#eq? @tag_name "a")
-  (#eq? @href_name "href")
-  (#eq? @title_name "title"))
-  ]]
-  )
-
   ---@type ChapItem[]
   local res = {}
-  local parent = dl_tag:parent()
-  for _, match in item_query:iter_matches(parent, normalized, parent:start(), parent:end_(), { all = true }) do
-    local record = {}
+  for _, match in query:iter_matches(root, normalized, 0, -1, { all = true }) do
+    local item = {}
     for id, nodes in pairs(match) do
-      local name = item_query.captures[id]
-      for _, node in ipairs(nodes) do
-        if name == 'href_value' then
-          record.link = vim.treesitter.get_node_text(node, normalized)
-        elseif name == 'title_value' then
-          record.title = vim.treesitter.get_node_text(node, normalized)
+      local name = query.captures[id]
+      if vim.list_contains({ 'link', 'title' }, name) then
+        for _, node in ipairs(nodes) do
+          item[name] = vim.treesitter.get_node_text(node, normalized)
         end
       end
     end
-    res[#res + 1] = record
+    res[#res + 1] = item
   end
-
   return res
 end
 
@@ -244,104 +205,64 @@ local function get_books(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, 'html')
   local root = parser:parse()[1]:root()
-
-  local grid_query = vim.treesitter.query.parse(
+  local query = vim.treesitter.query.parse(
     'html',
     [[
 (
-  (start_tag
-    (tag_name) @tag_name
-    (attribute
-      (attribute_name) @attr_name
-      (quoted_attribute_value) @attr_value)) @start_tag
-  (#eq? @tag_name "table")
-  (#eq? @attr_name "class")
-  (#eq? @attr_value "\"grid\""))
+ (element
+   (start_tag
+     (tag_name) @table_tag_name
+     (attribute
+       (attribute_name) @grid_attr_name
+       (quoted_attribute_value) @grid_attr_value))
+   (element
+     (element
+       (start_tag
+         (tag_name) @a_td_tag_name
+         (attribute
+           (attribute_name) @a_odd_attr_name
+           (quoted_attribute_value) @a_odd_attr_value))
+       (element
+         (start_tag
+           (tag_name) @a_tag_name
+           (attribute
+             (attribute_name) @href_attr_name
+             (quoted_attribute_value
+               (attribute_value) @link)) .)
+         (text) @title))
+     (element
+       (start_tag
+         (tag_name) @text_td_tag_name
+         (attribute
+           (attribute_name) @text_odd_attr_name
+           (quoted_attribute_value) @text_odd_attr_value) .)
+       (text) @author)))
+ (#eq? @table_tag_name "table")
+ (#eq? @grid_attr_name "class")
+ (#eq? @grid_attr_value "\"grid\"")
+ (#eq? @a_td_tag_name "td")
+ (#eq? @a_odd_attr_name "class")
+ (#eq? @a_odd_attr_value "\"odd\"")
+ (#eq? @a_tag_name "a")
+ (#eq? @text_td_tag_name "td")
+ (#eq? @text_odd_attr_name "class")
+ (#eq? @text_odd_attr_value "\"odd\""))
   ]]
   )
-
-  ---@type TSNode
-  local grid_tag
-  for id, node in grid_query:iter_captures(root, normalized) do
-    local capture = grid_query.captures[id]
-    if capture == 'start_tag' then
-      grid_tag = node
-      break
-    end
-  end
-
-  if grid_tag == nil then
-    return {}
-  end
-
-  local tr_query = vim.treesitter.query.parse(
-    'html',
-    [[
-(
-  (start_tag
-    (tag_name) @tag_name) @start_tag
-  (#eq? @tag_name "tr"))
-  ]]
-  )
-
-  local td_query = vim.treesitter.query.parse(
-    'html',
-    [[
-(
-  (start_tag
-    (tag_name) @tag_name
-    (attribute
-      (attribute_name) @attr_name
-      (quoted_attribute_value) @attr_value)) @start_tag
-  (#eq? @tag_name "td")
-  (#eq? @attr_name "class")
-  (#eq? @attr_value "\"odd\""))
-  ]]
-  )
-
-  local elem_query = vim.treesitter.query.parse(
-    'html',
-    [[
-(
-  (start_tag
-    (tag_name) @tag_name
-    (attribute
-      (attribute_name) @attr_name
-      (quoted_attribute_value
-        (attribute_value) @attr_value)))
-  (#eq? @tag_name "a")
-  (#eq? @attr_name "href"))
-
-(text) @text
-  ]]
-  )
-
   ---@type BookItem[]
   local res = {}
-  for i, ni in tr_query:iter_captures(grid_tag:parent(), normalized) do
-    if tr_query.captures[i] == 'start_tag' and ni:named_child_count() == 1 then
-      local item = {}
-      for j, nj in td_query:iter_captures(ni:parent(), normalized) do
-        if td_query.captures[j] == 'start_tag' and nj:named_child_count() == 2 then
-          local sibling = nj:next_sibling()
-          if sibling:type() == 'text' then
-            item.author = vim.treesitter.get_node_text(sibling, normalized)
-          elseif sibling:type() == 'element' then
-            for k, nk in elem_query:iter_captures(sibling, normalized) do
-              local name = elem_query.captures[k]
-              if name == 'text' then
-                item.title = vim.treesitter.get_node_text(nk, normalized)
-              elseif name == 'attr_value' then
-                item.link = vim.treesitter.get_node_text(nk, normalized)
-              end
-            end
-          end
+  for _, match in query:iter_matches(root, normalized, 0, -1, { all = true }) do
+    local item = {}
+    for id, nodes in pairs(match) do
+      local name = query.captures[id]
+      if vim.list_contains({ 'link', 'title', 'author' }, name) then
+        for _, node in ipairs(nodes) do
+          item[name] = vim.treesitter.get_node_text(node, normalized)
         end
       end
-      res[#res + 1] = item
     end
+    res[#res + 1] = item
   end
-
   return res
 end
 
@@ -387,7 +308,7 @@ local vt_ns = vim.api.nvim_create_namespace('biquge_virtual_text')
 
 function M.show()
   if begin_index == -1 or end_index == -1 then
-    warn('没有正在阅读的章节，请先搜索想要阅读的章节')
+    notify('没有正在阅读的章节，请先搜索想要阅读的章节', vim.log.levels.WARN)
     return
   end
   current_position = {
@@ -425,7 +346,7 @@ end
 
 local function jump_chap(offset)
   if current_toc == nil then
-    warn('没有正在阅读的小说，请先搜索想要阅读的小说')
+    notify('没有正在阅读的小说，请先搜索想要阅读的小说', vim.log.levels.WARN)
     return
   end
   local index = current_chap_index()
@@ -478,7 +399,7 @@ end
 
 function M.toc()
   if current_book == nil then
-    warn('没有正在阅读的小说，请先搜索想要阅读的小说')
+    notify('没有正在阅读的小说，请先搜索想要阅读的小说', vim.log.levels.WARN)
     return
   end
   fetch_toc(function()
@@ -572,17 +493,17 @@ end
 function M.star(book)
   book = book or current_book
   if book == nil then
-    warn('没有正在阅读的小说，无法收藏')
+    notify('没有正在阅读的小说，无法收藏', vim.log.levels.WARN)
     return
   end
   for i, r in ipairs(bookshelf) do
     if vim.deep_equal(book, r.info) then
-      info('取消收藏 ' .. book.title .. ' - ' .. book.author)
+      notify('取消收藏 ' .. book.title .. ' - ' .. book.author, vim.log.levels.INFO)
       table.remove(bookshelf, i)
       return
     end
   end
-  info('收藏 ' .. book.title .. ' - ' .. book.author)
+  notify('收藏 ' .. book.title .. ' - ' .. book.author, vim.log.levels.INFO)
   bookshelf[#bookshelf + 1] = {
     info = book,
     last_read = current_chap_index(),
