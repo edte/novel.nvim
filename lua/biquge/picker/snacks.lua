@@ -9,7 +9,7 @@ local function transform_items(opts)
 end
 
 return {
-  ---@param opts BiqugePickerPickOpts
+  ---@param opts biquge.picker.Opts
   pick = vim.schedule_wrap(function(opts)
     local actions = vim.deepcopy(opts.actions)
     for k, action in pairs(actions or {}) do

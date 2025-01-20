@@ -1,5 +1,5 @@
 return {
-  ---@param opts BiqugePickerPickOpts
+  ---@param opts biquge.picker.Opts
   pick = vim.schedule_wrap(function(opts)
     vim.ui.select(opts.items, {
       prompt = opts.prompt,

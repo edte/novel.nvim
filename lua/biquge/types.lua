@@ -1,44 +1,37 @@
----@class BiqugeBook
+---@class biquge.Book
 ---@field author string
 ---@field link string
 ---@field title string
 ---
----@class BiqugeChap
+---@class biquge.Chapter
 ---@field link string
 ---@field title string
 ---
----@class BiqugePosition
+---@class biquge.Location
 ---@field bufnr integer
 ---@field row integer
 ---
----@class BiqugeBookRecord
----@field info BiqugeBook
+---@class biquge.Record
+---@field info biquge.Book
 ---@field last_read integer
 ---
----@class BiqugeConfig
+---@class biquge.Config
 ---@field width integer
 ---@field height integer
 ---@field hlgroup string
 ---@field bookshelf string
 ---@field picker "builtin" | "telescope"
 ---
----@alias BiqugePickerAction fun(picker:any, item: any)
----@alias BiqugePickerActions table<string, BiqugePickerAction>
+---@alias biquge.picker.Action fun(picker:any, item: any)
 ---
----@class BiqugePickerKey
+---@class biquge.picker.Key
 ---@field [1] string
 ---@field mode string | string[] | nil
 ---
----@alias BiqugePickerKeys table<string, string | BiqugePickerKey>
----
----@class BiqugePickerOpts
+---@class biquge.picker.Opts
 ---@field items any[]
 ---@field display fun(item: any): string
----
----@class BiqugePickerPickOpts: BiqugePickerOpts
----@field prompt string
----@field confirm fun(picker: any, item: any)
----@field actions? BiqugePickerActions
----@field keys? BiqugePickerKeys
----
----@alias BiqugePickerRefreshOpts BiqugePickerOpts
+---@field prompt? string
+---@field confirm? biquge.picker.Action
+---@field actions? table<string, biquge.picker.Action>
+---@field keys? table<string, string | biquge.picker.Key>

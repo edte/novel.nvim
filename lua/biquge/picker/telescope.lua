@@ -4,7 +4,7 @@ local conf = require("telescope.config").values
 local action_state = require("telescope.actions.state")
 local actions = require("telescope.actions")
 
----@param opts BiqugePickerOpts
+---@param opts biquge.picker.Opts
 local function new_finder(opts)
   return finders.new_table({
     results = opts.items,
@@ -20,7 +20,7 @@ local function new_finder(opts)
 end
 
 return {
-  ---@param opts BiqugePickerPickOpts
+  ---@param opts biquge.picker.Opts
   pick = vim.schedule_wrap(function(opts)
     pickers
       .new({}, {
@@ -48,7 +48,7 @@ return {
       :find()
   end),
   ---@param picker Picker
-  ---@param opts BiqugePickerRefreshOpts
+  ---@param opts biquge.picker.Opts
   refresh = vim.schedule_wrap(function(picker, opts)
     picker:refresh(new_finder(opts), { reset_prompt = true })
   end),

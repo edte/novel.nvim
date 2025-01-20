@@ -6,13 +6,13 @@ local DOMAIN = "http://www.xbiquzw.com"
 
 local active = false
 
----@type BiqugeBook?
+---@type biquge.Book?
 local current_book = nil
 
----@type BiqugeChap[]
+---@type biquge.Chapter[]
 local current_toc = {}
 
----@type BiqugeChap?
+---@type biquge.Chapter?
 local current_chap = nil
 
 ---@type string[]
@@ -20,15 +20,15 @@ local current_content = {}
 
 local begin_index, end_index = -1, -1
 
----@type BiqugePosition?
-local current_position = nil
+---@type biquge.Location?
+local current_location = nil
 
 local current_extmark_id = -1
 
----@type BiqugeBookRecord[]
+---@type biquge.Record[]
 local bookshelf = nil
 
----@type BiqugeConfig
+---@type biquge.Config
 local config = {
   width = 30,
   height = 10,
@@ -70,7 +70,7 @@ local function save()
   end
 end
 
----@param opts BiqugeConfig
+---@param opts biquge.Config
 M.setup = function(opts)
   config = vim.tbl_deep_extend("force", config, opts)
 
@@ -130,7 +130,7 @@ local function get_content(text)
 end
 
 ---@param text string
----@return BiqugeChap[]
+---@return biquge.Chapter[]
 local function get_toc(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, "html")
@@ -168,7 +168,7 @@ local function get_toc(text)
   ]]
   )
 
-  ---@type BiqugeChap[]
+  ---@type biquge.Chapter[]
   local res = {}
   for _, match in query:iter_matches(root, normalized, 0, -1, { all = true }) do
     local item = {}
@@ -189,7 +189,7 @@ local function get_toc(text)
 end
 
 ---@param text string
----@return BiqugeBook[]
+---@return biquge.Book[]
 local function get_books(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, "html")
@@ -240,7 +240,7 @@ local function get_books(text)
   ]]
   )
 
-  ---@type BiqugeBook[]
+  ---@type biquge.Book[]
   local res = {}
   for _, match in query:iter_matches(root, normalized, 0, -1, { all = true }) do
     local item = {}
@@ -318,7 +318,7 @@ function M.show()
     return
   end
 
-  current_position = {
+  current_location = {
     bufnr = Async.api.nvim_get_current_buf(),
     row = Async.api.nvim_win_get_cursor(0)[1] - 1,
   }
@@ -328,7 +328,7 @@ function M.show()
     virt_lines[#virt_lines + 1] = { { line, config.hlgroup } }
   end
 
-  current_extmark_id = Async.api.nvim_buf_set_extmark(current_position.bufnr, NS, current_position.row, 0, {
+  current_extmark_id = Async.api.nvim_buf_set_extmark(current_location.bufnr, NS, current_location.row, 0, {
     id = (current_extmark_id ~= -1) and current_extmark_id or nil,
     virt_lines = virt_lines,
     virt_lines_above = false,
@@ -338,11 +338,11 @@ function M.show()
 end
 
 function M.hide()
-  if not active or not current_position then
+  if not active or not current_location then
     return
   end
 
-  vim.api.nvim_buf_clear_namespace(current_position.bufnr, NS, 0, -1)
+  vim.api.nvim_buf_clear_namespace(current_location.bufnr, NS, 0, -1)
   current_extmark_id = -1
   active = false
 end
@@ -434,11 +434,11 @@ function M.toc()
     Picker.pick({
       prompt = current_book.title .. " - 目录",
       items = current_toc,
-      ---@param item BiqugeChap
+      ---@param item biquge.Chapter
       display = function(item)
         return item.title
       end,
-      ---@param chap BiqugeChap
+      ---@param chap biquge.Chapter
       confirm = function(_, chap)
         current_chap = chap
         Async.run(cook_content)
@@ -456,7 +456,7 @@ local function reset()
   current_chap = nil
   current_content = {}
   begin_index, end_index = -1, -1
-  current_position = nil
+  current_location = nil
   current_extmark_id = -1
 end
 
@@ -485,11 +485,11 @@ M.search = function()
     Picker.pick({
       prompt = "搜索结果",
       items = results,
-      ---@param item BiqugeBook
+      ---@param item biquge.Book
       display = function(item)
         return item.title .. " - " .. item.author
       end,
-      ---@param item BiqugeBook
+      ---@param item biquge.Book
       confirm = function(_, item)
         current_book = item
         M.toc()
@@ -498,7 +498,7 @@ M.search = function()
   end)
 end
 
----@param book BiqugeBook?
+---@param book biquge.Book?
 function M.star(book)
   book = book or current_book
   if book == nil then
@@ -524,7 +524,7 @@ end
 function M.bookshelf()
   reset()
 
-  ---@param item BiqugeBookRecord
+  ---@param item biquge.Record
   local function display(item)
     return item.info.title .. " - " .. item.info.author
   end
@@ -541,7 +541,7 @@ function M.bookshelf()
     prompt = "书架",
     items = bookshelf,
     display = display,
-    ---@param item BiqugeBookRecord
+    ---@param item biquge.Record
     confirm = function(_, item)
       current_book = item.info
 
