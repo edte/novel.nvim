@@ -1,12 +1,12 @@
 local M = {}
 
-local finders = require('telescope.finders')
-local pickers = require('telescope.pickers')
-local conf = require('telescope.config').values
-local action_state = require('telescope.actions.state')
-local actions = require('telescope.actions')
+local finders = require("telescope.finders")
+local pickers = require("telescope.pickers")
+local conf = require("telescope.config").values
+local action_state = require("telescope.actions.state")
+local actions = require("telescope.actions")
 
-local DOMAIN = 'http://www.xbiquzw.com'
+local DOMAIN = "http://www.xbiquzw.com"
 
 local active = false
 
@@ -53,14 +53,14 @@ local bookshelf = nil
 local config = {
   width = 30,
   height = 10,
-  hlgroup = 'Comment',
-  bookshelf = vim.fs.joinpath(vim.fn.stdpath('data'), 'biquge_bookshelf.json'),
+  hlgroup = "Comment",
+  bookshelf = vim.fs.joinpath(vim.fn.stdpath("data"), "biquge_bookshelf.json"),
 }
 
 ---@param msg string
 ---@param level integer
 local function notify(msg, level)
-  vim.notify(msg, level, { title = 'biquge.nvim' })
+  vim.notify(msg, level, { title = "biquge.nvim" })
 end
 
 ---@return integer
@@ -86,7 +86,7 @@ end
 
 ---@param opts BiqugeConfig
 M.setup = function(opts)
-  config = vim.tbl_extend('force', config, opts)
+  config = vim.tbl_extend("force", config, opts)
 
   if vim.fn.filereadable(config.bookshelf) == 1 then
     local text = vim.fn.readfile(config.bookshelf)
@@ -95,29 +95,29 @@ M.setup = function(opts)
     bookshelf = {}
   end
 
-  vim.api.nvim_create_autocmd('VimLeave', {
+  vim.api.nvim_create_autocmd("VimLeave", {
     callback = function()
       save()
       vim.fn.writefile({ vim.json.encode(bookshelf) }, config.bookshelf)
     end,
-    group = vim.api.nvim_create_augroup('biquge_bookshelf', {}),
+    group = vim.api.nvim_create_augroup("biquge_bookshelf", {}),
   })
 end
 
 ---@param text string
 local function normalize(text)
-  return text:gsub('&nbsp;', ' '):gsub('<br%s*/>', '\n'):gsub('\r\n', '\n')
+  return text:gsub("&nbsp;", " "):gsub("<br%s*/>", "\n"):gsub("\r\n", "\n")
 end
 
 ---@param text string
 ---@return string[]
 local function get_content(text)
   local normalized = normalize(text)
-  local parser = vim.treesitter.get_string_parser(normalized, 'html')
+  local parser = vim.treesitter.get_string_parser(normalized, "html")
   local root = parser:parse()[1]:root()
 
   local query = vim.treesitter.query.parse(
-    'html',
+    "html",
     [[
 (
  (element
@@ -135,8 +135,8 @@ local function get_content(text)
 
   for id, node in query:iter_captures(root, normalized) do
     local capture = query.captures[id]
-    if capture == 'text' then
-      return vim.split(vim.treesitter.get_node_text(node, normalized), '\n')
+    if capture == "text" then
+      return vim.split(vim.treesitter.get_node_text(node, normalized), "\n")
     end
   end
 
@@ -147,11 +147,11 @@ end
 ---@return BiqugeChap[]
 local function get_toc(text)
   local normalized = normalize(text)
-  local parser = vim.treesitter.get_string_parser(normalized, 'html')
+  local parser = vim.treesitter.get_string_parser(normalized, "html")
   local root = parser:parse()[1]:root()
 
   local query = vim.treesitter.query.parse(
-    'html',
+    "html",
     [[
 (
  (element
@@ -189,7 +189,7 @@ local function get_toc(text)
 
     for id, nodes in pairs(match) do
       local name = query.captures[id]
-      if vim.list_contains({ 'link', 'title' }, name) then
+      if vim.list_contains({ "link", "title" }, name) then
         for _, node in ipairs(nodes) do
           item[name] = vim.treesitter.get_node_text(node, normalized)
         end
@@ -206,11 +206,11 @@ end
 ---@return BiqugeBook[]
 local function get_books(text)
   local normalized = normalize(text)
-  local parser = vim.treesitter.get_string_parser(normalized, 'html')
+  local parser = vim.treesitter.get_string_parser(normalized, "html")
   local root = parser:parse()[1]:root()
 
   local query = vim.treesitter.query.parse(
-    'html',
+    "html",
     [[
 (
  (element
@@ -261,7 +261,7 @@ local function get_books(text)
 
     for id, nodes in pairs(match) do
       local name = query.captures[id]
-      if vim.list_contains({ 'link', 'title', 'author' }, name) then
+      if vim.list_contains({ "link", "title", "author" }, name) then
         for _, node in ipairs(nodes) do
           item[name] = vim.treesitter.get_node_text(node, normalized)
         end
@@ -297,29 +297,29 @@ end
 local function cook_content()
   vim.system(
     {
-      'curl',
-      '--compressed',
+      "curl",
+      "--compressed",
       DOMAIN .. current_book.link .. current_chap.link,
     },
     { text = true },
     vim.schedule_wrap(function(obj)
       local content = get_content(obj.stdout)
-      current_content = { '-- ' .. current_chap.title .. ' --' }
+      current_content = { "-- " .. current_chap.title .. " --" }
       for _, line in ipairs(content) do
         vim.list_extend(current_content, pieces(line))
       end
-      current_content[#current_content + 1] = '-- 本章完 --'
+      current_content[#current_content + 1] = "-- 本章完 --"
       begin_index, end_index = 1, 1 + config.height
       M.show()
     end)
   )
 end
 
-local NS = vim.api.nvim_create_namespace('biquge_virtual_text')
+local NS = vim.api.nvim_create_namespace("biquge_virtual_text")
 
 function M.show()
   if begin_index == -1 or end_index == -1 then
-    notify('没有正在阅读的章节，请先搜索想要阅读的章节', vim.log.levels.WARN)
+    notify("没有正在阅读的章节，请先搜索想要阅读的章节", vim.log.levels.WARN)
     return
   end
 
@@ -362,7 +362,7 @@ end
 
 local function jump_chap(offset)
   if current_toc == nil then
-    notify('没有正在阅读的小说，请先搜索想要阅读的小说', vim.log.levels.WARN)
+    notify("没有正在阅读的小说，请先搜索想要阅读的小说", vim.log.levels.WARN)
     return
   end
 
@@ -406,8 +406,8 @@ end
 local function fetch_toc(callback)
   vim.system(
     {
-      'curl',
-      '--compressed',
+      "curl",
+      "--compressed",
       DOMAIN .. current_book.link,
     },
     { text = true },
@@ -420,15 +420,15 @@ end
 
 function M.toc()
   if current_book == nil then
-    notify('没有正在阅读的小说，请先搜索想要阅读的小说', vim.log.levels.WARN)
+    notify("没有正在阅读的小说，请先搜索想要阅读的小说", vim.log.levels.WARN)
     return
   end
 
   fetch_toc(function()
     pickers
       .new({}, {
-        prompt_title = current_book.title .. ' - 目录',
-        finder = finders.new_table {
+        prompt_title = current_book.title .. " - 目录",
+        finder = finders.new_table({
           results = current_toc,
           entry_maker = function(entry)
             return {
@@ -437,8 +437,8 @@ function M.toc()
               ordinal = entry.title,
             }
           end,
-        },
-        sorter = conf.generic_sorter {},
+        }),
+        sorter = conf.generic_sorter({}),
         attach_mappings = function(prompt_bufnr, _)
           actions.select_default:replace(function()
             actions.close(prompt_bufnr)
@@ -468,35 +468,35 @@ end
 M.search = function()
   reset()
 
-  vim.ui.input({ prompt = '书名' }, function(input)
+  vim.ui.input({ prompt = "书名" }, function(input)
     if input == nil then
       return
     end
 
     vim.system(
       {
-        'curl',
-        '--compressed',
-        DOMAIN .. '/modules/article/search.php?searchkey=' .. input:gsub(' ', '+'),
+        "curl",
+        "--compressed",
+        DOMAIN .. "/modules/article/search.php?searchkey=" .. input:gsub(" ", "+"),
       },
       { text = true },
       vim.schedule_wrap(function(obj)
         local results = get_books(obj.stdout)
         pickers
           .new({}, {
-            prompt_title = '搜索结果',
-            finder = finders.new_table {
+            prompt_title = "搜索结果",
+            finder = finders.new_table({
               results = results,
               entry_maker = function(entry)
-                local display = entry.title .. ' - ' .. entry.author
+                local display = entry.title .. " - " .. entry.author
                 return {
                   value = entry,
                   display = display,
                   ordinal = display,
                 }
               end,
-            },
-            sorter = conf.generic_sorter {},
+            }),
+            sorter = conf.generic_sorter({}),
             attach_mappings = function(prompt_bufnr, _)
               actions.select_default:replace(function()
                 actions.close(prompt_bufnr)
@@ -516,19 +516,19 @@ end
 function M.star(book)
   book = book or current_book
   if book == nil then
-    notify('没有正在阅读的小说，无法收藏', vim.log.levels.WARN)
+    notify("没有正在阅读的小说，无法收藏", vim.log.levels.WARN)
     return
   end
 
   for i, r in ipairs(bookshelf) do
     if vim.deep_equal(book, r.info) then
-      notify('取消收藏 ' .. book.title .. ' - ' .. book.author, vim.log.levels.INFO)
+      notify("取消收藏 " .. book.title .. " - " .. book.author, vim.log.levels.INFO)
       table.remove(bookshelf, i)
       return
     end
   end
 
-  notify('收藏 ' .. book.title .. ' - ' .. book.author, vim.log.levels.INFO)
+  notify("收藏 " .. book.title .. " - " .. book.author, vim.log.levels.INFO)
   bookshelf[#bookshelf + 1] = {
     info = book,
     last_read = current_chap_index(),
@@ -539,17 +539,17 @@ function M.bookshelf()
   reset()
 
   local function new_finder()
-    return finders.new_table {
+    return finders.new_table({
       results = bookshelf,
       entry_maker = function(entry)
-        local display = entry.info.title .. ' - ' .. entry.info.author
+        local display = entry.info.title .. " - " .. entry.info.author
         return {
           value = entry,
           display = display,
           ordinal = display,
         }
       end,
-    }
+    })
   end
 
   local function unstar(picker_bufnr)
@@ -563,9 +563,9 @@ function M.bookshelf()
 
   pickers
     .new({}, {
-      prompt_title = '书架 | <CR> 打开 | <C-d> 取消收藏 (i) | dd 取消收藏 (n)',
+      prompt_title = "书架 | <CR> 打开 | <C-d> 取消收藏 (i) | dd 取消收藏 (n)",
       finder = new_finder(),
-      sorter = conf.generic_sorter {},
+      sorter = conf.generic_sorter({}),
       attach_mappings = function(prompt_bufnr, map)
         actions.select_default:replace(function()
           actions.close(prompt_bufnr)
@@ -577,10 +577,10 @@ function M.bookshelf()
           end)
         end)
 
-        map({ 'n' }, 'dd', function()
+        map({ "n" }, "dd", function()
           unstar(prompt_bufnr)
         end)
-        map({ 'i' }, '<C-d>', function()
+        map({ "i" }, "<C-d>", function()
           unstar(prompt_bufnr)
         end)
 
