@@ -35,7 +35,7 @@ return {
   ---@param picker snacks.Picker
   ---@param opts biquge.picker.Opts
   refresh = function(picker, opts)
-    picker.finder.items = transform_items(opts)
+    picker.opts.items = transform_items(opts)
     picker:find()
   end,
 }
