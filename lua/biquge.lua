@@ -10,13 +10,20 @@ local DOMAIN = 'http://www.xbiquzw.com'
 
 local active = false
 
----@type BookItem
+---@class BiqugeBook
+---@field author string
+---@field link string
+---@field title string
 local current_book = nil
 
----@type ChapItem[]
+---@class BiqugeChap
+---@field link string
+---@field title string
+
+---@type BiqugeChap[]
 local current_toc = nil
 
----@type ChapItem
+---@type BiqugeChap
 local current_chap = nil
 
 ---@type string[]
@@ -24,29 +31,25 @@ local current_content = nil
 
 local begin_index, end_index = -1, -1
 
----@class Position
+---@class BiqugePosition
 ---@field bufnr integer
 ---@field row integer
----
----@type Position
 local current_position = nil
 
 local current_extmark_id = -1
 
----@class BookRecord
----@field info BookItem
+---@class BiqugeBookRecord
+---@field info BiqugeBook
 ---@field last_read integer
 ---
----@type BookRecord[]
+---@type BiqugeBookRecord[]
 local bookshelf = nil
 
----@class Config
+---@class BiqugeConfig
 ---@field width integer
 ---@field height integer
 ---@field hlgroup string
 ---@field bookshelf string
----
----@type Config
 local config = {
   width = 30,
   height = 10,
@@ -81,6 +84,7 @@ local function save()
   end
 end
 
+---@param opts BiqugeConfig
 M.setup = function(opts)
   config = vim.tbl_extend('force', config, opts)
 
@@ -111,6 +115,7 @@ local function get_content(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, 'html')
   local root = parser:parse()[1]:root()
+
   local query = vim.treesitter.query.parse(
     'html',
     [[
@@ -127,25 +132,24 @@ local function get_content(text)
  (#eq? @attr_value "\"content\""))
   ]]
   )
+
   for id, node in query:iter_captures(root, normalized) do
     local capture = query.captures[id]
     if capture == 'text' then
       return vim.split(vim.treesitter.get_node_text(node, normalized), '\n')
     end
   end
+
   return {}
 end
 
----@class ChapItem
----@field link string
----@field title string
----
 ---@param text string
----@return ChapItem[]
+---@return BiqugeChap[]
 local function get_toc(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, 'html')
   local root = parser:parse()[1]:root()
+
   local query = vim.treesitter.query.parse(
     'html',
     [[
@@ -177,10 +181,12 @@ local function get_toc(text)
  (#eq? @title_attr_name "title"))
   ]]
   )
-  ---@type ChapItem[]
+
+  ---@type BiqugeChap[]
   local res = {}
   for _, match in query:iter_matches(root, normalized, 0, -1, { all = true }) do
     local item = {}
+
     for id, nodes in pairs(match) do
       local name = query.captures[id]
       if vim.list_contains({ 'link', 'title' }, name) then
@@ -189,22 +195,20 @@ local function get_toc(text)
         end
       end
     end
+
     res[#res + 1] = item
   end
+
   return res
 end
 
----@class BookItem
----@field author string
----@field link string
----@field title string
----
 ---@param text string
----@return BookItem[]
+---@return BiqugeBook[]
 local function get_books(text)
   local normalized = normalize(text)
   local parser = vim.treesitter.get_string_parser(normalized, 'html')
   local root = parser:parse()[1]:root()
+
   local query = vim.treesitter.query.parse(
     'html',
     [[
@@ -249,10 +253,12 @@ local function get_books(text)
  (#eq? @text_odd_attr_value "\"odd\""))
   ]]
   )
-  ---@type BookItem[]
+
+  ---@type BiqugeBook[]
   local res = {}
   for _, match in query:iter_matches(root, normalized, 0, -1, { all = true }) do
     local item = {}
+
     for id, nodes in pairs(match) do
       local name = query.captures[id]
       if vim.list_contains({ 'link', 'title', 'author' }, name) then
@@ -261,8 +267,10 @@ local function get_books(text)
         end
       end
     end
+
     res[#res + 1] = item
   end
+
   return res
 end
 
@@ -271,15 +279,18 @@ end
 local function pieces(line)
   local res = {}
   local pos = vim.str_utf_pos(line)
+
   if #pos == 0 then
     return {}
   end
+
   local i, j = 1, 1 + config.width
   repeat
     res[#res + 1] = string.sub(line, pos[i], (pos[j] or 0) - 1)
     i = i + config.width
     j = j + config.width
   until i > #pos
+
   return res
 end
 
@@ -304,26 +315,30 @@ local function cook_content()
   )
 end
 
-local vt_ns = vim.api.nvim_create_namespace('biquge_virtual_text')
+local NS = vim.api.nvim_create_namespace('biquge_virtual_text')
 
 function M.show()
   if begin_index == -1 or end_index == -1 then
     notify('没有正在阅读的章节，请先搜索想要阅读的章节', vim.log.levels.WARN)
     return
   end
+
   current_position = {
     bufnr = vim.api.nvim_get_current_buf(),
     row = vim.api.nvim_win_get_cursor(0)[1] - 1,
   }
+
   local virt_lines = {}
   for _, line in ipairs(vim.list_slice(current_content, begin_index, end_index)) do
     virt_lines[#virt_lines + 1] = { { line, config.hlgroup } }
   end
-  current_extmark_id = vim.api.nvim_buf_set_extmark(current_position.bufnr, vt_ns, current_position.row, 0, {
+
+  current_extmark_id = vim.api.nvim_buf_set_extmark(current_position.bufnr, NS, current_position.row, 0, {
     id = (current_extmark_id ~= -1) and current_extmark_id or nil,
     virt_lines = virt_lines,
     virt_lines_above = false,
   })
+
   active = true
 end
 
@@ -331,7 +346,8 @@ function M.hide()
   if not active then
     return
   end
-  vim.api.nvim_buf_clear_namespace(current_position.bufnr, vt_ns, 0, -1)
+
+  vim.api.nvim_buf_clear_namespace(current_position.bufnr, NS, 0, -1)
   current_extmark_id = -1
   active = false
 end
@@ -349,11 +365,13 @@ local function jump_chap(offset)
     notify('没有正在阅读的小说，请先搜索想要阅读的小说', vim.log.levels.WARN)
     return
   end
+
   local index = current_chap_index()
   local target = index + offset
   if target < 1 or target > #current_toc then
     return
   end
+
   current_chap = current_toc[target]
   cook_content()
 end
@@ -370,12 +388,15 @@ function M.scroll(offset)
   if not active then
     return
   end
+
   if begin_index + offset < 1 then
     return
   end
+
   if end_index + offset > #current_content then
     return
   end
+
   begin_index = begin_index + offset
   end_index = end_index + offset
   M.show()
@@ -402,6 +423,7 @@ function M.toc()
     notify('没有正在阅读的小说，请先搜索想要阅读的小说', vim.log.levels.WARN)
     return
   end
+
   fetch_toc(function()
     pickers
       .new({}, {
@@ -450,6 +472,7 @@ M.search = function()
     if input == nil then
       return
     end
+
     vim.system(
       {
         'curl',
@@ -489,13 +512,14 @@ M.search = function()
   end)
 end
 
----@param book BookItem?
+---@param book BiqugeBook?
 function M.star(book)
   book = book or current_book
   if book == nil then
     notify('没有正在阅读的小说，无法收藏', vim.log.levels.WARN)
     return
   end
+
   for i, r in ipairs(bookshelf) do
     if vim.deep_equal(book, r.info) then
       notify('取消收藏 ' .. book.title .. ' - ' .. book.author, vim.log.levels.INFO)
@@ -503,6 +527,7 @@ function M.star(book)
       return
     end
   end
+
   notify('收藏 ' .. book.title .. ' - ' .. book.author, vim.log.levels.INFO)
   bookshelf[#bookshelf + 1] = {
     info = book,
