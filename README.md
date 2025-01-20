@@ -40,7 +40,10 @@
 ```lua
 {
     'v1nh1shungry/biquge.nvim',
-    dependencies = 'nvim-telescope/telescope.nvim',
+    dependencies = {
+        'nvim-lua/plenary.nvim',
+        'nvim-telescope/telescope.nvim',
+    },
     keys = {
         { '<Leader>b/', function() require('biquge').search() end, desc = 'Search' },
         { '<Leader>bb', function() require('biquge').toggle() end, desc = 'Toggle' },

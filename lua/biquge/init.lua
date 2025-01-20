@@ -1,5 +1,7 @@
 local M = {}
 
+local Async = require("biquge.async")
+
 local finders = require("telescope.finders")
 local pickers = require("telescope.pickers")
 local conf = require("telescope.config").values
@@ -86,7 +88,7 @@ end
 
 ---@param opts BiqugeConfig
 M.setup = function(opts)
-  config = vim.tbl_extend("force", config, opts)
+  config = vim.tbl_deep_extend("force", config, opts)
 
   if vim.fn.filereadable(config.bookshelf) == 1 then
     local text = vim.fn.readfile(config.bookshelf)
@@ -294,25 +296,30 @@ local function pieces(line)
   return res
 end
 
+---@async
 local function cook_content()
-  vim.system(
-    {
-      "curl",
-      "--compressed",
-      DOMAIN .. current_book.link .. current_chap.link,
-    },
-    { text = true },
-    vim.schedule_wrap(function(obj)
-      local content = get_content(obj.stdout)
-      current_content = { "-- " .. current_chap.title .. " --" }
-      for _, line in ipairs(content) do
-        vim.list_extend(current_content, pieces(line))
-      end
-      current_content[#current_content + 1] = "-- 本章完 --"
-      begin_index, end_index = 1, 1 + config.height
-      M.show()
-    end)
-  )
+  local res = Async.system({
+    "curl",
+    "--compressed",
+    DOMAIN .. current_book.link .. current_chap.link,
+  })
+
+  if res.code ~= 0 then
+    notify("Failed to fetch chapter content: " .. res.stderr, vim.log.levels.ERROR)
+    return
+  end
+
+  local content = get_content(res.stdout)
+  current_content = { "-- " .. current_chap.title .. " --" }
+
+  for _, line in ipairs(content) do
+    vim.list_extend(current_content, pieces(line))
+  end
+
+  current_content[#current_content + 1] = "-- 本章完 --"
+  begin_index, end_index = 1, 1 + config.height
+
+  M.show()
 end
 
 local NS = vim.api.nvim_create_namespace("biquge_virtual_text")
@@ -324,8 +331,8 @@ function M.show()
   end
 
   current_position = {
-    bufnr = vim.api.nvim_get_current_buf(),
-    row = vim.api.nvim_win_get_cursor(0)[1] - 1,
+    bufnr = Async.api.nvim_get_current_buf(),
+    row = Async.api.nvim_win_get_cursor(0)[1] - 1,
   }
 
   local virt_lines = {}
@@ -333,7 +340,7 @@ function M.show()
     virt_lines[#virt_lines + 1] = { { line, config.hlgroup } }
   end
 
-  current_extmark_id = vim.api.nvim_buf_set_extmark(current_position.bufnr, NS, current_position.row, 0, {
+  current_extmark_id = Async.api.nvim_buf_set_extmark(current_position.bufnr, NS, current_position.row, 0, {
     id = (current_extmark_id ~= -1) and current_extmark_id or nil,
     virt_lines = virt_lines,
     virt_lines_above = false,
@@ -373,7 +380,7 @@ local function jump_chap(offset)
   end
 
   current_chap = current_toc[target]
-  cook_content()
+  Async.run(cook_content)
 end
 
 function M.next_chap()
@@ -402,20 +409,23 @@ function M.scroll(offset)
   M.show()
 end
 
----@param callback fun()
-local function fetch_toc(callback)
-  vim.system(
-    {
-      "curl",
-      "--compressed",
-      DOMAIN .. current_book.link,
-    },
-    { text = true },
-    vim.schedule_wrap(function(obj)
-      current_toc = get_toc(obj.stdout)
-      callback()
-    end)
-  )
+---@async
+---@return boolean
+local function fetch_toc()
+  local res = Async.system({
+    "curl",
+    "--compressed",
+    DOMAIN .. current_book.link,
+  })
+
+  if res.code ~= 0 then
+    notify("Failed to fetch table of contents: " .. res.stderr, vim.log.levels.ERROR)
+    return false
+  end
+
+  current_toc = get_toc(res.stdout)
+
+  return true
 end
 
 function M.toc()
@@ -424,7 +434,12 @@ function M.toc()
     return
   end
 
-  fetch_toc(function()
+  Async.run(function()
+    if not fetch_toc() then
+      return
+    end
+
+    Async.util.scheduler()
     pickers
       .new({}, {
         prompt_title = current_book.title .. " - 目录",
@@ -443,7 +458,7 @@ function M.toc()
           actions.select_default:replace(function()
             actions.close(prompt_bufnr)
             current_chap = action_state.get_selected_entry().value
-            cook_content()
+            Async.run(cook_content)
           end)
           return true
         end,
@@ -468,47 +483,51 @@ end
 M.search = function()
   reset()
 
-  vim.ui.input({ prompt = "书名" }, function(input)
+  Async.run(function()
+    local input = Async.input({ prompt = "书名" })
     if input == nil then
       return
     end
 
-    vim.system(
-      {
-        "curl",
-        "--compressed",
-        DOMAIN .. "/modules/article/search.php?searchkey=" .. input:gsub(" ", "+"),
-      },
-      { text = true },
-      vim.schedule_wrap(function(obj)
-        local results = get_books(obj.stdout)
-        pickers
-          .new({}, {
-            prompt_title = "搜索结果",
-            finder = finders.new_table({
-              results = results,
-              entry_maker = function(entry)
-                local display = entry.title .. " - " .. entry.author
-                return {
-                  value = entry,
-                  display = display,
-                  ordinal = display,
-                }
-              end,
-            }),
-            sorter = conf.generic_sorter({}),
-            attach_mappings = function(prompt_bufnr, _)
-              actions.select_default:replace(function()
-                actions.close(prompt_bufnr)
-                current_book = action_state.get_selected_entry().value
-                M.toc()
-              end)
-              return true
-            end,
-          })
-          :find()
-      end)
-    )
+    local res = Async.system({
+      "curl",
+      "--compressed",
+      DOMAIN .. "/modules/article/search.php?searchkey=" .. input:gsub(" ", "+"),
+    })
+
+    if res.code ~= 0 then
+      notify("Failed to search: " .. res.stderr, vim.log.levels.ERROR)
+      return
+    end
+
+    local results = get_books(res.stdout)
+
+    Async.util.scheduler()
+    pickers
+      .new({}, {
+        prompt_title = "搜索结果",
+        finder = finders.new_table({
+          results = results,
+          entry_maker = function(entry)
+            local display = entry.title .. " - " .. entry.author
+            return {
+              value = entry,
+              display = display,
+              ordinal = display,
+            }
+          end,
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, _)
+          actions.select_default:replace(function()
+            actions.close(prompt_bufnr)
+            current_book = action_state.get_selected_entry().value
+            M.toc()
+          end)
+          return true
+        end,
+      })
+      :find()
   end)
 end
 
@@ -569,9 +588,15 @@ function M.bookshelf()
       attach_mappings = function(prompt_bufnr, map)
         actions.select_default:replace(function()
           actions.close(prompt_bufnr)
+
           local value = action_state.get_selected_entry().value
           current_book = value.info
-          fetch_toc(function()
+
+          Async.run(function()
+            if not fetch_toc() then
+              return
+            end
+
             current_chap = current_toc[value.last_read]
             cook_content()
           end)
