@@ -30,8 +30,8 @@
 
 ## 依赖
 
-* Neovim >= 0.10.0，本人使用的是nightly
-* curl，难道你指望我用lua手搓一个HTTP客户端？
+* Neovim >= 0.10.0
+* curl
 
 ## 安装
 
@@ -42,7 +42,8 @@
     'v1nh1shungry/biquge.nvim',
     dependencies = {
         'nvim-lua/plenary.nvim',
-        'nvim-telescope/telescope.nvim',
+        'nvim-telescope/telescope.nvim', -- optional for telescope picker
+        "folke/snacks.nvim", -- optional for snacks picker
     },
     keys = {
         { '<Leader>b/', function() require('biquge').search() end, desc = 'Search' },
@@ -70,6 +71,10 @@
     height = 10, -- 显示文本的行数
     hlgroup = 'Comment', -- 高亮组
     bookshelf = vim.fs.joinpath(vim.fn.stdpath('data'), 'biquge_bookshelf.json'), -- 书架存储路径
+    -- * builtin: vim.ui.select
+    -- * telescope
+    -- * snacks
+    picker = "builtin",
 }
 ```
 
@@ -88,7 +93,9 @@
 |   prev_chap()  |              上一章节              |
 |   bookshelf()  |              查看书架              |
 
-### 书架 Telescope 热键
+### 书架热键
+
+**NOTE: builtin picker does not support any following keymaps.**
 
 |   热键   | 模式 |        描述        |
 |:--------:|:----:|:------------------:|

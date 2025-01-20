@@ -2,62 +2,46 @@ local M = {}
 
 local Async = require("biquge.async")
 
-local finders = require("telescope.finders")
-local pickers = require("telescope.pickers")
-local conf = require("telescope.config").values
-local action_state = require("telescope.actions.state")
-local actions = require("telescope.actions")
-
 local DOMAIN = "http://www.xbiquzw.com"
 
 local active = false
 
----@class BiqugeBook
----@field author string
----@field link string
----@field title string
+---@type BiqugeBook?
 local current_book = nil
 
----@class BiqugeChap
----@field link string
----@field title string
-
 ---@type BiqugeChap[]
-local current_toc = nil
+local current_toc = {}
 
----@type BiqugeChap
+---@type BiqugeChap?
 local current_chap = nil
 
 ---@type string[]
-local current_content = nil
+local current_content = {}
 
 local begin_index, end_index = -1, -1
 
----@class BiqugePosition
----@field bufnr integer
----@field row integer
+---@type BiqugePosition?
 local current_position = nil
 
 local current_extmark_id = -1
 
----@class BiqugeBookRecord
----@field info BiqugeBook
----@field last_read integer
----
 ---@type BiqugeBookRecord[]
 local bookshelf = nil
 
----@class BiqugeConfig
----@field width integer
----@field height integer
----@field hlgroup string
----@field bookshelf string
+---@type BiqugeConfig
 local config = {
   width = 30,
   height = 10,
   hlgroup = "Comment",
   bookshelf = vim.fs.joinpath(vim.fn.stdpath("data"), "biquge_bookshelf.json"),
+  picker = "builtin",
 }
+
+local Picker = setmetatable({}, {
+  __index = function(_, k)
+    return require("biquge.picker." .. config.picker)[k]
+  end,
+})
 
 ---@param msg string
 ---@param level integer
@@ -298,6 +282,10 @@ end
 
 ---@async
 local function cook_content()
+  if not current_book or not current_chap then
+    return
+  end
+
   local res = Async.system({
     "curl",
     "--compressed",
@@ -350,7 +338,7 @@ function M.show()
 end
 
 function M.hide()
-  if not active then
+  if not active or not current_position then
     return
   end
 
@@ -368,7 +356,7 @@ function M.toggle()
 end
 
 local function jump_chap(offset)
-  if current_toc == nil then
+  if #current_toc == 0 then
     notify("没有正在阅读的小说，请先搜索想要阅读的小说", vim.log.levels.WARN)
     return
   end
@@ -412,6 +400,10 @@ end
 ---@async
 ---@return boolean
 local function fetch_toc()
+  if not current_book then
+    return false
+  end
+
   local res = Async.system({
     "curl",
     "--compressed",
@@ -439,31 +431,19 @@ function M.toc()
       return
     end
 
-    Async.util.scheduler()
-    pickers
-      .new({}, {
-        prompt_title = current_book.title .. " - 目录",
-        finder = finders.new_table({
-          results = current_toc,
-          entry_maker = function(entry)
-            return {
-              value = entry,
-              display = entry.title,
-              ordinal = entry.title,
-            }
-          end,
-        }),
-        sorter = conf.generic_sorter({}),
-        attach_mappings = function(prompt_bufnr, _)
-          actions.select_default:replace(function()
-            actions.close(prompt_bufnr)
-            current_chap = action_state.get_selected_entry().value
-            Async.run(cook_content)
-          end)
-          return true
-        end,
-      })
-      :find()
+    Picker.pick({
+      prompt = current_book.title .. " - 目录",
+      items = current_toc,
+      ---@param item BiqugeChap
+      display = function(item)
+        return item.title
+      end,
+      ---@param chap BiqugeChap
+      confirm = function(_, chap)
+        current_chap = chap
+        Async.run(cook_content)
+      end,
+    })
   end)
 end
 
@@ -472,9 +452,9 @@ local function reset()
   save()
 
   current_book = nil
-  current_toc = nil
+  current_toc = {}
   current_chap = nil
-  current_content = nil
+  current_content = {}
   begin_index, end_index = -1, -1
   current_position = nil
   current_extmark_id = -1
@@ -502,32 +482,19 @@ M.search = function()
 
     local results = get_books(res.stdout)
 
-    Async.util.scheduler()
-    pickers
-      .new({}, {
-        prompt_title = "搜索结果",
-        finder = finders.new_table({
-          results = results,
-          entry_maker = function(entry)
-            local display = entry.title .. " - " .. entry.author
-            return {
-              value = entry,
-              display = display,
-              ordinal = display,
-            }
-          end,
-        }),
-        sorter = conf.generic_sorter({}),
-        attach_mappings = function(prompt_bufnr, _)
-          actions.select_default:replace(function()
-            actions.close(prompt_bufnr)
-            current_book = action_state.get_selected_entry().value
-            M.toc()
-          end)
-          return true
-        end,
-      })
-      :find()
+    Picker.pick({
+      prompt = "搜索结果",
+      items = results,
+      ---@param item BiqugeBook
+      display = function(item)
+        return item.title .. " - " .. item.author
+      end,
+      ---@param item BiqugeBook
+      confirm = function(_, item)
+        current_book = item
+        M.toc()
+      end,
+    })
   end)
 end
 
@@ -557,62 +524,42 @@ end
 function M.bookshelf()
   reset()
 
-  local function new_finder()
-    return finders.new_table({
-      results = bookshelf,
-      entry_maker = function(entry)
-        local display = entry.info.title .. " - " .. entry.info.author
-        return {
-          value = entry,
-          display = display,
-          ordinal = display,
-        }
-      end,
+  ---@param item BiqugeBookRecord
+  local function display(item)
+    return item.info.title .. " - " .. item.info.author
+  end
+
+  local function unstar(picker, item)
+    M.star(item.info)
+    Picker.refresh(picker, {
+      items = bookshelf,
+      display = display,
     })
   end
 
-  local function unstar(picker_bufnr)
-    local selection = action_state.get_selected_entry().value
-    local picker = action_state.get_current_picker(picker_bufnr)
-    if selection then
-      M.star(selection.info)
-      picker:refresh(new_finder(), { reset_prompt = true })
-    end
-  end
+  Picker.pick({
+    prompt = "书架",
+    items = bookshelf,
+    display = display,
+    ---@param item BiqugeBookRecord
+    confirm = function(_, item)
+      current_book = item.info
 
-  pickers
-    .new({}, {
-      prompt_title = "书架 | <CR> 打开 | <C-d> 取消收藏 (i) | dd 取消收藏 (n)",
-      finder = new_finder(),
-      sorter = conf.generic_sorter({}),
-      attach_mappings = function(prompt_bufnr, map)
-        actions.select_default:replace(function()
-          actions.close(prompt_bufnr)
+      Async.run(function()
+        if not fetch_toc() then
+          return
+        end
 
-          local value = action_state.get_selected_entry().value
-          current_book = value.info
-
-          Async.run(function()
-            if not fetch_toc() then
-              return
-            end
-
-            current_chap = current_toc[value.last_read]
-            cook_content()
-          end)
-        end)
-
-        map({ "n" }, "dd", function()
-          unstar(prompt_bufnr)
-        end)
-        map({ "i" }, "<C-d>", function()
-          unstar(prompt_bufnr)
-        end)
-
-        return true
-      end,
-    })
-    :find()
+        current_chap = current_toc[item.last_read]
+        cook_content()
+      end)
+    end,
+    actions = { unstar = unstar },
+    keys = {
+      ["<C-x>"] = { "unstar", mode = "i" },
+      ["dd"] = "unstar",
+    },
+  })
 end
 
 return M
