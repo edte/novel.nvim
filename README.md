@@ -41,7 +41,6 @@
 {
     'v1nh1shungry/biquge.nvim',
     dependencies = {
-        'nvim-lua/plenary.nvim',
         'nvim-telescope/telescope.nvim', -- optional for telescope picker
         "folke/snacks.nvim", -- optional for snacks picker
     },
