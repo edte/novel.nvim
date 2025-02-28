@@ -289,7 +289,7 @@ local function cook_content()
     vim.list_extend(current_content, pieces(line))
   end
 
-  begin_index, end_index = 1, 1 + config.height
+  begin_index, end_index = 1, config.height
 
   M.show()
 end
@@ -366,16 +366,16 @@ function M.scroll(offset)
     return
   end
 
-  if begin_index + offset < 1 then
+  local new_begin = math.max(begin_index + offset, 1)
+  local new_end = math.min(end_index + offset, #current_content)
+
+  if begin_index == new_begin or end_index == new_end then
     return
   end
 
-  if end_index + offset > #current_content then
-    return
-  end
+  begin_index = new_begin
+  end_index = new_end
 
-  begin_index = begin_index + offset
-  end_index = end_index + offset
   M.show()
 end
 
