@@ -3,13 +3,13 @@ local M = {}
 local Async = require("biquge.async")
 
 local DOMAIN = "http://www.xbiquzw.com"
+local NS_ID = vim.api.nvim_create_namespace("biquge_virtual_text")
 
 local current_book = nil ---@type biquge.Book?
 local current_toc = {} ---@type biquge.Chapter[]
 local current_chap = nil ---@type biquge.Chapter?
 local current_content = {} ---@type string[]
 local current_location = nil ---@type biquge.Location?
-local current_extmark_id = -1
 local active = false
 local begin_index, end_index = -1, -1
 local bookshelf = nil ---@type biquge.Record[]
@@ -283,19 +283,16 @@ local function cook_content()
   end
 
   local content = get_content(res.stdout)
-  current_content = { "-- " .. current_chap.title .. " --" }
+  current_content = { "# " .. current_chap.title }
 
   for _, line in ipairs(content) do
     vim.list_extend(current_content, pieces(line))
   end
 
-  current_content[#current_content + 1] = "-- 本章完 --"
   begin_index, end_index = 1, 1 + config.height
 
   M.show()
 end
-
-local NS = vim.api.nvim_create_namespace("biquge_virtual_text")
 
 function M.show()
   if begin_index == -1 or end_index == -1 then
@@ -313,8 +310,8 @@ function M.show()
     virt_lines[#virt_lines + 1] = { { line, config.hlgroup } }
   end
 
-  current_extmark_id = Async.api.nvim_buf_set_extmark(current_location.bufnr, NS, current_location.row, 0, {
-    id = (current_extmark_id ~= -1) and current_extmark_id or nil,
+  Async.api.nvim_buf_clear_namespace(current_location.bufnr, NS_ID, 0, -1)
+  Async.api.nvim_buf_set_extmark(current_location.bufnr, NS_ID, current_location.row, 0, {
     virt_lines = virt_lines,
     virt_lines_above = false,
   })
@@ -327,8 +324,7 @@ function M.hide()
     return
   end
 
-  vim.api.nvim_buf_clear_namespace(current_location.bufnr, NS, 0, -1)
-  current_extmark_id = -1
+  vim.api.nvim_buf_clear_namespace(current_location.bufnr, NS_ID, 0, -1)
   active = false
 end
 
@@ -364,6 +360,7 @@ function M.prev_chap()
   jump_chap(-1)
 end
 
+---@param offset integer
 function M.scroll(offset)
   if not active then
     return
@@ -442,7 +439,6 @@ local function reset()
   current_content = {}
   begin_index, end_index = -1, -1
   current_location = nil
-  current_extmark_id = -1
 end
 
 M.search = function()
