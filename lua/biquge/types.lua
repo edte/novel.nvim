@@ -20,13 +20,13 @@
 ---@field height integer
 ---@field hlgroup string
 ---@field bookshelf string
----@field picker "builtin" | "telescope"
+---@field picker "builtin"|"telescope"|"snacks"
 ---
 ---@alias biquge.picker.Action fun(picker:any, item: any)
 ---
 ---@class biquge.picker.Key
 ---@field [1] string
----@field mode string | string[] | nil
+---@field mode string|string[]|nil
 ---
 ---@class biquge.picker.Opts
 ---@field items any[]
@@ -34,4 +34,4 @@
 ---@field prompt? string
 ---@field confirm? biquge.picker.Action
 ---@field actions? table<string, biquge.picker.Action>
----@field keys? table<string, string | biquge.picker.Key>
+---@field keys? table<string, string|biquge.picker.Key>

@@ -4,32 +4,17 @@ local Async = require("biquge.async")
 
 local DOMAIN = "http://www.xbiquzw.com"
 
-local active = false
-
----@type biquge.Book?
-local current_book = nil
-
----@type biquge.Chapter[]
-local current_toc = {}
-
----@type biquge.Chapter?
-local current_chap = nil
-
----@type string[]
-local current_content = {}
-
-local begin_index, end_index = -1, -1
-
----@type biquge.Location?
-local current_location = nil
-
+local current_book = nil ---@type biquge.Book?
+local current_toc = {} ---@type biquge.Chapter[]
+local current_chap = nil ---@type biquge.Chapter?
+local current_content = {} ---@type string[]
+local current_location = nil ---@type biquge.Location?
 local current_extmark_id = -1
+local active = false
+local begin_index, end_index = -1, -1
+local bookshelf = nil ---@type biquge.Record[]
 
----@type biquge.Record[]
-local bookshelf = nil
-
----@type biquge.Config
-local config = {
+local config = { ---@type biquge.Config
   width = 30,
   height = 10,
   hlgroup = "Comment",
