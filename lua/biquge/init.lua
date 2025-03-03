@@ -366,15 +366,13 @@ function M.scroll(offset)
     return
   end
 
-  local new_begin = math.max(begin_index + offset, 1)
-  local new_end = math.min(end_index + offset, #current_content)
-
-  if begin_index == new_begin or end_index == new_end then
+  local step = offset < 0 and math.max(1 - begin_index, offset) or math.min(#current_content - end_index, offset)
+  if step == 0 then
     return
   end
 
-  begin_index = new_begin
-  end_index = new_end
+  begin_index = begin_index + step
+  end_index = end_index + step
 
   M.show()
 end
