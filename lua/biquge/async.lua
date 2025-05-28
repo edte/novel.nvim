@@ -35,6 +35,8 @@ end
 
 M.system = M.wrap(vim.system) ---@type async fun(cmd: string[], opts?: vim.SystemOpts): vim.SystemCompleted
 
+M.input = M.wrap(vim.schedule_wrap(vim.ui.input)) ---@type async fun(opts?: table)
+
 M.schedule = M.wrap(vim.schedule) ---@type async fun()
 
 ---@param t table
