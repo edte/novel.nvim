@@ -266,17 +266,23 @@ local function pieces(line)
 end
 
 ---@async
+---@param uri string
+local function request(uri)
+  return Async.system({
+    "curl",
+    "-fsSL",
+    "--compressed",
+    DOMAIN .. uri,
+  })
+end
+
+---@async
 local function cook_content()
   if not current_book or not current_chap then
     return
   end
 
-  local res = Async.system({
-    "curl",
-    "--compressed",
-    DOMAIN .. current_book.link .. current_chap.link,
-  })
-
+  local res = request(current_book.link .. current_chap.link)
   if res.code ~= 0 then
     notify("Failed to fetch chapter content: " .. res.stderr, vim.log.levels.ERROR)
     return
@@ -384,12 +390,7 @@ local function fetch_toc()
     return false
   end
 
-  local res = Async.system({
-    "curl",
-    "--compressed",
-    DOMAIN .. current_book.link,
-  })
-
+  local res = request(current_book.link)
   if res.code ~= 0 then
     notify("Failed to fetch table of contents: " .. res.stderr, vim.log.levels.ERROR)
     return false
@@ -448,12 +449,7 @@ M.search = function()
       return
     end
 
-    local res = Async.system({
-      "curl",
-      "--compressed",
-      DOMAIN .. "/modules/article/search.php?searchkey=" .. input:gsub(" ", "+"),
-    })
-
+    local res = request("/modules/article/search.php?searchkey=" .. vim.uri_encode(input))
     if res.code ~= 0 then
       notify("Failed to search: " .. res.stderr, vim.log.levels.ERROR)
       return
