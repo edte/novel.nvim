@@ -1,6 +1,7 @@
 local M = {}
 
 local Async = require("biquge.async")
+local Local = require("biquge.local")
 
 local DOMAIN = "http://www.xbiquzw.com"
 local NS_ID = vim.api.nvim_create_namespace("biquge_virtual_text")
@@ -13,13 +14,17 @@ local current_location = nil ---@type biquge.Location?
 local active = false
 local begin_index, end_index = -1, -1
 local bookshelf = nil ---@type biquge.Record[]
+local is_local_file = false -- 标识当前是否为本地文件
+local last_book = nil ---@type biquge.Record? -- 最后阅读的书籍
 
 local config = { ---@type biquge.Config
   width = 30,
   height = 10,
   hlgroup = "Comment",
   bookshelf = vim.fs.joinpath(vim.fn.stdpath("data"), "biquge_bookshelf.json"),
+  last_reading = vim.fs.joinpath(vim.fn.stdpath("data"), "biquge_last_reading.json"), -- 最后阅读记录
   picker = "builtin",
+  local_dir = vim.fs.joinpath(vim.fn.expand("~"), "Documents"), -- 默认本地文件目录
 }
 
 local Picker = setmetatable({}, {
@@ -46,12 +51,32 @@ end
 
 local function save()
   if current_book ~= nil then
+    -- 保存到书架
     for _, r in ipairs(bookshelf) do
       if vim.deep_equal(current_book, r.info) then
         r.last_read = current_chap_index()
-        return
+        -- 保存详细阅读位置
+        r.reading_position = {
+          chapter_index = current_chap_index(),
+          line_index = begin_index,
+          timestamp = os.time()
+        }
+        break
       end
     end
+    
+    -- 保存最后阅读的书籍
+    last_book = {
+      info = current_book,
+      last_read = current_chap_index(),
+      is_local = is_local_file,
+      chapters = is_local_file and current_toc or nil,
+      reading_position = {
+        chapter_index = current_chap_index(),
+        line_index = begin_index,
+        timestamp = os.time()
+      }
+    }
   end
 end
 
@@ -59,11 +84,20 @@ end
 M.setup = function(opts)
   config = vim.tbl_deep_extend("force", config, opts)
 
+  -- 加载书架
   if vim.fn.filereadable(config.bookshelf) == 1 then
     local text = vim.fn.readfile(config.bookshelf)
     bookshelf = vim.json.decode(table.concat(text))
   else
     bookshelf = {}
+  end
+  
+  -- 加载最后阅读记录
+  if vim.fn.filereadable(config.last_reading) == 1 then
+    local text = vim.fn.readfile(config.last_reading)
+    last_book = vim.json.decode(table.concat(text))
+  else
+    last_book = nil
   end
 
   vim.api.nvim_create_autocmd("VimLeave", {
@@ -282,13 +316,21 @@ local function cook_content()
     return
   end
 
-  local res = request(current_book.link .. current_chap.link)
-  if res.code ~= 0 then
-    notify("Failed to fetch chapter content: " .. res.stderr, vim.log.levels.ERROR)
-    return
+  local content = {}
+  
+  if is_local_file then
+    -- 本地文件直接从章节中获取内容
+    content = Local.get_chapter_content(current_chap)
+  else
+    -- 在线文件通过网络请求获取
+    local res = request(current_book.link .. current_chap.link)
+    if res.code ~= 0 then
+      notify("Failed to fetch chapter content: " .. res.stderr, vim.log.levels.ERROR)
+      return
+    end
+    content = get_content(res.stdout)
   end
 
-  local content = get_content(res.stdout)
   current_content = { "# " .. current_chap.title }
 
   for _, line in ipairs(content) do
@@ -390,15 +432,20 @@ local function fetch_toc()
     return false
   end
 
-  local res = request(current_book.link)
-  if res.code ~= 0 then
-    notify("Failed to fetch table of contents: " .. res.stderr, vim.log.levels.ERROR)
-    return false
+  if is_local_file then
+    -- 本地文件的目录已经在解析时生成，直接返回
+    return #current_toc > 0
+  else
+    -- 在线文件通过网络请求获取目录
+    local res = request(current_book.link)
+    if res.code ~= 0 then
+      notify("Failed to fetch table of contents: " .. res.stderr, vim.log.levels.ERROR)
+      return false
+    end
+
+    current_toc = get_toc(res.stdout)
+    return true
   end
-
-  current_toc = get_toc(res.stdout)
-
-  return true
 end
 
 function M.toc()
@@ -438,6 +485,7 @@ local function reset()
   current_content = {}
   begin_index, end_index = -1, -1
   current_location = nil
+  is_local_file = false
 end
 
 M.search = function()
@@ -490,10 +538,18 @@ function M.star(book)
   end
 
   notify("收藏 " .. book.title .. " - " .. book.author, vim.log.levels.INFO)
-  bookshelf[#bookshelf + 1] = {
+  local record = {
     info = book,
     last_read = current_chap_index(),
+    is_local = is_local_file,
   }
+  
+  -- 如果是本地文件，保存章节信息
+  if is_local_file then
+    record.chapters = current_toc
+  end
+  
+  bookshelf[#bookshelf + 1] = record
 end
 
 function M.bookshelf()
@@ -501,7 +557,8 @@ function M.bookshelf()
 
   ---@param item biquge.Record
   local function display(item)
-    return item.info.title .. " - " .. item.info.author
+    local prefix = item.is_local and "[本地] " or "[在线] "
+    return prefix .. item.info.title .. " - " .. item.info.author
   end
 
   local function unstar(picker, item)
@@ -519,15 +576,28 @@ function M.bookshelf()
     ---@param item biquge.Record
     confirm = function(_, item)
       current_book = item.info
+      is_local_file = item.is_local or false
 
-      Async.run(function()
-        if not fetch_toc() then
-          return
+      if is_local_file then
+        -- 本地文件直接使用保存的章节信息
+        current_toc = item.chapters or {}
+        if #current_toc > 0 and item.last_read > 0 and item.last_read <= #current_toc then
+          current_chap = current_toc[item.last_read]
+          Async.run(cook_content)
+        else
+          notify("本地文件章节信息丢失，请重新加载", vim.log.levels.WARN)
         end
+      else
+        -- 在线文件
+        Async.run(function()
+          if not fetch_toc() then
+            return
+          end
 
-        current_chap = current_toc[item.last_read]
-        cook_content()
-      end)
+          current_chap = current_toc[item.last_read]
+          cook_content()
+        end)
+      end
     end,
     actions = { unstar = unstar },
     keys = {
@@ -535,6 +605,157 @@ function M.bookshelf()
       ["dd"] = "unstar",
     },
   })
+end
+
+-- 浏览本地文件目录
+M.local_browse = function()
+  reset()
+  
+  -- 获取默认目录下的所有 TXT 文件
+  local txt_files = vim.fn.glob(vim.fs.joinpath(config.local_dir, "*.txt"), false, true)
+  
+  if #txt_files == 0 then
+    notify("在目录 " .. config.local_dir .. " 中没有找到 TXT 文件", vim.log.levels.WARN)
+    return
+  end
+  
+  -- 转换为文件名显示
+  local items = {}
+  for _, filepath in ipairs(txt_files) do
+    local filename = vim.fn.fnamemodify(filepath, ":t")
+    table.insert(items, {
+      display = filename,
+      path = filepath
+    })
+  end
+  
+  Picker.pick({
+    prompt = "选择本地文件 (" .. config.local_dir .. ")",
+    items = items,
+    display = function(item)
+      return item.display
+    end,
+    confirm = function(_, item)
+      -- 直接加载选中的文件
+      local book, chapters = Local.parse_txt_file(item.path)
+      if not book then
+        notify("解析文件失败", vim.log.levels.ERROR)
+        return
+      end
+
+      current_book = book
+      current_toc = chapters
+      is_local_file = true
+
+      notify("成功加载: " .. book.title .. " (共 " .. #chapters .. " 章)", vim.log.levels.INFO)
+      M.toc()
+    end,
+  })
+end
+
+-- 本地文件搜索功能
+M.local_search = function()
+  reset()
+
+  Async.run(function()
+    -- 使用文件选择器选择TXT文件
+    local input = Async.input({ 
+      prompt = "请输入TXT文件路径 (默认目录: " .. config.local_dir .. "): ",
+      completion = "file"
+    })
+    
+    if not input or input == "" then
+      return
+    end
+
+    -- 智能路径处理
+    local filepath
+    if vim.startswith(input, "/") or vim.startswith(input, "~") then
+      -- 绝对路径或家目录路径
+      filepath = vim.fn.expand(input)
+    else
+      -- 相对路径，先尝试相对于默认目录
+      local default_path = vim.fs.joinpath(config.local_dir, input)
+      if vim.fn.filereadable(default_path) == 1 then
+        filepath = default_path
+      else
+        -- 尝试模糊匹配（在默认目录中查找包含输入文本的文件）
+        local pattern = vim.fs.joinpath(config.local_dir, "*" .. input .. "*.txt")
+        local matches = vim.fn.glob(pattern, false, true)
+        if #matches > 0 then
+          if #matches == 1 then
+            filepath = matches[1]
+            notify("找到匹配文件: " .. vim.fn.fnamemodify(matches[1], ":t"), vim.log.levels.INFO)
+          else
+            -- 多个匹配，让用户选择
+            local items = {}
+            for _, match in ipairs(matches) do
+              local filename = vim.fn.fnamemodify(match, ":t")
+              table.insert(items, {
+                display = filename,
+                path = match
+              })
+            end
+            
+            Picker.pick({
+              prompt = "找到多个匹配文件，请选择:",
+              items = items,
+              display = function(item) return item.display end,
+              confirm = function(_, item)
+                -- 递归调用，使用选中的文件路径
+                local book, chapters = Local.parse_txt_file(item.path)
+                if not book then
+                  notify("解析文件失败", vim.log.levels.ERROR)
+                  return
+                end
+
+                current_book = book
+                current_toc = chapters
+                is_local_file = true
+
+                notify("成功加载: " .. book.title .. " (共 " .. #chapters .. " 章)", vim.log.levels.INFO)
+                M.toc()
+              end,
+            })
+            return
+          end
+        else
+          -- 尝试相对于当前工作目录
+          filepath = vim.fn.expand(input)
+        end
+      end
+    end
+    
+    -- 检查文件是否存在
+    if vim.fn.filereadable(filepath) ~= 1 then
+      notify("文件不存在或无法读取: " .. filepath, vim.log.levels.ERROR)
+      return
+    end
+
+    -- 检查是否为TXT文件
+    local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
+    if ext ~= "txt" then
+      notify("目前只支持 .txt 文件", vim.log.levels.WARN)
+      return
+    end
+
+    -- 解析本地文件
+    local book, chapters = Local.parse_txt_file(filepath)
+    if not book then
+      notify("解析文件失败", vim.log.levels.ERROR)
+      return
+    end
+
+    -- 设置当前状态
+    current_book = book
+    current_toc = chapters
+    is_local_file = true
+
+    notify("成功加载本地文件: " .. book.title .. " (共 " .. #chapters .. " 章)", vim.log.levels.INFO)
+
+    -- 显示章节选择器
+    M.toc()
+  end)
 end
 
 return M

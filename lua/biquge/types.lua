@@ -6,6 +6,8 @@
 ---@class biquge.Chapter
 ---@field link string
 ---@field title string
+---@field content? string[] -- 本地文件章节内容
+---@field start_line? integer -- 本地文件章节起始行号
 ---
 ---@class biquge.Location
 ---@field bufnr integer
@@ -14,13 +16,23 @@
 ---@class biquge.Record
 ---@field info biquge.Book
 ---@field last_read integer
+---@field is_local? boolean -- 标识是否为本地文件
+---@field chapters? biquge.Chapter[] -- 本地文件的章节缓存
+---@field reading_position? biquge.ReadingPosition -- 详细阅读位置
+
+---@class biquge.ReadingPosition
+---@field chapter_index integer -- 章节索引
+---@field line_index integer -- 行索引（在当前章节内容中的位置）
+---@field timestamp integer -- 最后阅读时间戳
 ---
 ---@class biquge.Config
 ---@field width integer
 ---@field height integer
 ---@field hlgroup string
 ---@field bookshelf string
+---@field last_reading string -- 最后阅读记录文件路径
 ---@field picker "builtin"|"telescope"|"snacks"
+---@field local_dir string -- 本地文件默认目录
 ---
 ---@alias biquge.picker.Action fun(picker:any, item: any)
 ---
