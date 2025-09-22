@@ -587,13 +587,13 @@ function M.star(book)
 
   for i, r in ipairs(bookshelf) do
     if vim.deep_equal(book, r.info) then
-      notify("取消收藏 " .. book.title .. " - " .. book.author, vim.log.levels.INFO)
+      -- 取消收藏
       table.remove(bookshelf, i)
       return
     end
   end
 
-  notify("收藏 " .. book.title .. " - " .. book.author, vim.log.levels.INFO)
+  -- 收藏成功
   local record = {
     info = book,
     last_read = current_chap_index(),
@@ -712,7 +712,7 @@ M.local_browse = function()
       current_toc = chapters
       is_local_file = true
 
-      notify("成功加载: " .. book.title .. " (共 " .. #chapters .. " 章)", vim.log.levels.INFO)
+      -- 成功加载文件
       M.toc()
     end,
   })
@@ -750,7 +750,7 @@ M.local_search = function()
         if #matches > 0 then
           if #matches == 1 then
             filepath = matches[1]
-            notify("找到匹配文件: " .. vim.fn.fnamemodify(matches[1], ":t"), vim.log.levels.INFO)
+            -- 找到匹配文件
           else
             -- 多个匹配，让用户选择
             local items = {}
@@ -778,7 +778,7 @@ M.local_search = function()
                 current_toc = chapters
                 is_local_file = true
 
-                notify("成功加载: " .. book.title .. " (共 " .. #chapters .. " 章)", vim.log.levels.INFO)
+                -- 成功加载文件
                 M.toc()
               end,
             })
@@ -816,7 +816,7 @@ M.local_search = function()
     current_toc = chapters
     is_local_file = true
 
-    notify("成功加载本地文件: " .. book.title .. " (共 " .. #chapters .. " 章)", vim.log.levels.INFO)
+    -- 成功加载本地文件
 
     -- 显示章节选择器
     M.toc()
