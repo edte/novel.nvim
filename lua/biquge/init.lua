@@ -14,6 +14,7 @@ local current_location = nil ---@type biquge.Location?
 local active = false
 local begin_index, end_index = -1, -1
 local bookshelf = nil ---@type biquge.Record[]
+local reading_history = nil ---@type table<string, biquge.ReadingRecord> -- 所有书籍的阅读记录
 local is_local_file = false -- 标识当前是否为本地文件
 local last_book = nil ---@type biquge.Record? -- 最后阅读的书籍
 
@@ -22,6 +23,7 @@ local config = { ---@type biquge.Config
   height = 10,
   hlgroup = "Comment",
   bookshelf = vim.fs.joinpath(vim.fn.stdpath("data"), "biquge_bookshelf.json"),
+  reading_history = vim.fs.joinpath(vim.fn.stdpath("data"), "biquge_reading_history.json"), -- 所有书籍阅读历史
   last_reading = vim.fs.joinpath(vim.fn.stdpath("data"), "biquge_last_reading.json"), -- 最后阅读记录
   picker = "builtin",
   local_dir = vim.fs.joinpath(vim.fn.expand("~"), "Documents"), -- 默认本地文件目录
@@ -39,6 +41,15 @@ local function notify(msg, level)
   vim.notify(msg, level, { title = "biquge.nvim" })
 end
 
+---生成书籍的唯一标识
+---@param book biquge.Book
+---@return string
+local function get_book_id(book)
+  -- 使用标题+作者+链接生成唯一ID，避免重复
+  local id_string = book.title .. "|" .. book.author .. "|" .. book.link
+  return vim.fn.sha256(id_string)
+end
+
 ---@return integer
 local function current_chap_index()
   for i, item in ipairs(current_toc) do
@@ -51,22 +62,8 @@ end
 
 local function save()
   if current_book ~= nil then
-    -- 保存到书架
-    for _, r in ipairs(bookshelf) do
-      if vim.deep_equal(current_book, r.info) then
-        r.last_read = current_chap_index()
-        -- 保存详细阅读位置
-        r.reading_position = {
-          chapter_index = current_chap_index(),
-          line_index = begin_index,
-          timestamp = os.time()
-        }
-        break
-      end
-    end
-    
-    -- 保存最后阅读的书籍
-    last_book = {
+    local book_id = get_book_id(current_book)
+    local reading_record = {
       info = current_book,
       last_read = current_chap_index(),
       is_local = is_local_file,
@@ -77,6 +74,21 @@ local function save()
         timestamp = os.time()
       }
     }
+    
+    -- 保存到阅读历史（所有书籍）
+    reading_history[book_id] = reading_record
+    
+    -- 保存到书架（仅收藏的书籍）
+    for _, r in ipairs(bookshelf) do
+      if vim.deep_equal(current_book, r.info) then
+        r.last_read = current_chap_index()
+        r.reading_position = reading_record.reading_position
+        break
+      end
+    end
+    
+    -- 保存最后阅读的书籍
+    last_book = reading_record
   end
 end
 
@@ -92,6 +104,14 @@ M.setup = function(opts)
     bookshelf = {}
   end
   
+  -- 加载阅读历史记录
+  if vim.fn.filereadable(config.reading_history) == 1 then
+    local text = vim.fn.readfile(config.reading_history)
+    reading_history = vim.json.decode(table.concat(text))
+  else
+    reading_history = {}
+  end
+  
   -- 加载最后阅读记录
   if vim.fn.filereadable(config.last_reading) == 1 then
     local text = vim.fn.readfile(config.last_reading)
@@ -104,6 +124,11 @@ M.setup = function(opts)
     callback = function()
       save()
       vim.fn.writefile({ vim.json.encode(bookshelf) }, config.bookshelf)
+      vim.fn.writefile({ vim.json.encode(reading_history) }, config.reading_history)
+      -- 保存最后阅读记录
+      if last_book then
+        vim.fn.writefile({ vim.json.encode(last_book) }, config.last_reading)
+      end
     end,
     group = vim.api.nvim_create_augroup("biquge_bookshelf", {}),
   })
@@ -311,7 +336,8 @@ local function request(uri)
 end
 
 ---@async
-local function cook_content()
+---@param restore_position? boolean 是否恢复到上次阅读位置
+local function cook_content(restore_position)
   if not current_book or not current_chap then
     return
   end
@@ -337,7 +363,27 @@ local function cook_content()
     vim.list_extend(current_content, pieces(line))
   end
 
-  begin_index, end_index = 1, config.height
+  -- 恢复阅读位置或从头开始
+  if restore_position and current_book then
+    local book_id = get_book_id(current_book)
+    local reading_record = reading_history[book_id]
+    
+    if reading_record and reading_record.reading_position then
+      local pos = reading_record.reading_position
+      if pos.chapter_index == current_chap_index() and pos.line_index > 0 then
+        begin_index = math.min(pos.line_index, #current_content - config.height + 1)
+        begin_index = math.max(1, begin_index)
+        end_index = begin_index + config.height - 1
+        notify("已恢复到上次阅读位置 (第" .. pos.line_index .. "行)", vim.log.levels.INFO)
+      else
+        begin_index, end_index = 1, config.height
+      end
+    else
+      begin_index, end_index = 1, config.height
+    end
+  else
+    begin_index, end_index = 1, config.height
+  end
 
   M.show()
 end
@@ -365,6 +411,9 @@ function M.show()
   })
 
   active = true
+  
+  -- 实时保存阅读位置
+  save()
 end
 
 function M.hide()
@@ -397,7 +446,7 @@ local function jump_chap(offset)
   end
 
   current_chap = current_toc[target]
-  Async.run(cook_content)
+  Async.run(function() cook_content(false) end)
 end
 
 function M.next_chap()
@@ -423,6 +472,8 @@ function M.scroll(offset)
   end_index = end_index + step
 
   M.show()
+  -- 滚动时也保存位置
+  save()
 end
 
 ---@async
@@ -469,7 +520,7 @@ function M.toc()
       ---@param chap biquge.Chapter
       confirm = function(_, chap)
         current_chap = chap
-        Async.run(cook_content)
+        Async.run(function() cook_content(false) end)
       end,
     })
   end)
@@ -577,13 +628,18 @@ function M.bookshelf()
     confirm = function(_, item)
       current_book = item.info
       is_local_file = item.is_local or false
+      
+      -- 优先从阅读历史中获取最新的阅读记录
+      local book_id = get_book_id(current_book)
+      local history_record = reading_history[book_id]
+      local target_chapter_index = history_record and history_record.last_read or item.last_read
 
       if is_local_file then
         -- 本地文件直接使用保存的章节信息
-        current_toc = item.chapters or {}
-        if #current_toc > 0 and item.last_read > 0 and item.last_read <= #current_toc then
-          current_chap = current_toc[item.last_read]
-          Async.run(cook_content)
+        current_toc = (history_record and history_record.chapters) or item.chapters or {}
+        if #current_toc > 0 and target_chapter_index > 0 and target_chapter_index <= #current_toc then
+          current_chap = current_toc[target_chapter_index]
+          Async.run(function() cook_content(true) end)
         else
           notify("本地文件章节信息丢失，请重新加载", vim.log.levels.WARN)
         end
@@ -594,8 +650,12 @@ function M.bookshelf()
             return
           end
 
-          current_chap = current_toc[item.last_read]
-          cook_content()
+          if target_chapter_index > 0 and target_chapter_index <= #current_toc then
+            current_chap = current_toc[target_chapter_index]
+          else
+            current_chap = current_toc[1] -- 默认第一章
+          end
+          cook_content(true)
         end)
       end
     end,
@@ -756,6 +816,113 @@ M.local_search = function()
     -- 显示章节选择器
     M.toc()
   end)
+end
+
+-- 恢复上次阅读的书籍和位置
+M.resume_last_reading = function()
+  if not last_book then
+    notify("没有上次阅读记录", vim.log.levels.WARN)
+    return
+  end
+  
+  reset()
+  
+  current_book = last_book.info
+  is_local_file = last_book.is_local or false
+  
+  if is_local_file then
+    -- 本地文件
+    current_toc = last_book.chapters or {}
+    if #current_toc > 0 and last_book.last_read > 0 and last_book.last_read <= #current_toc then
+      current_chap = current_toc[last_book.last_read]
+      Async.run(function() cook_content(true) end)
+      notify("已恢复阅读: " .. current_book.title, vim.log.levels.INFO)
+    else
+      notify("本地文件章节信息丢失", vim.log.levels.WARN)
+    end
+  else
+    -- 在线文件
+    Async.run(function()
+      if not fetch_toc() then
+        return
+      end
+      
+      if last_book.last_read > 0 and last_book.last_read <= #current_toc then
+        current_chap = current_toc[last_book.last_read]
+        cook_content(true)
+        notify("已恢复阅读: " .. current_book.title, vim.log.levels.INFO)
+      else
+        notify("章节信息已过期，请重新选择章节", vim.log.levels.WARN)
+        M.toc()
+      end
+    end)
+  end
+end
+
+-- 查看所有书籍的阅读历史
+M.reading_history = function()
+  reset()
+  
+  if not reading_history or vim.tbl_isempty(reading_history) then
+    notify("没有阅读历史记录", vim.log.levels.WARN)
+    return
+  end
+  
+  -- 转换为数组并按时间排序
+  local history_items = {}
+  for _, record in pairs(reading_history) do
+    if record.reading_position and record.reading_position.timestamp then
+      table.insert(history_items, record)
+    end
+  end
+  
+  -- 按最后阅读时间倒序排列
+  table.sort(history_items, function(a, b)
+    return a.reading_position.timestamp > b.reading_position.timestamp
+  end)
+  
+  ---@param item biquge.ReadingRecord
+  local function display(item)
+    local prefix = item.is_local and "[本地] " or "[在线] "
+    local time_str = os.date("%m-%d %H:%M", item.reading_position.timestamp)
+    return prefix .. item.info.title .. " - " .. item.info.author .. " (" .. time_str .. ")"
+  end
+  
+  Picker.pick({
+    prompt = "阅读历史 (共 " .. #history_items .. " 本书)",
+    items = history_items,
+    display = display,
+    ---@param item biquge.ReadingRecord
+    confirm = function(_, item)
+      current_book = item.info
+      is_local_file = item.is_local or false
+      
+      if is_local_file then
+        -- 本地文件
+        current_toc = item.chapters or {}
+        if #current_toc > 0 and item.last_read > 0 and item.last_read <= #current_toc then
+          current_chap = current_toc[item.last_read]
+          Async.run(function() cook_content(true) end)
+        else
+          notify("本地文件章节信息丢失", vim.log.levels.WARN)
+        end
+      else
+        -- 在线文件
+        Async.run(function()
+          if not fetch_toc() then
+            return
+          end
+          
+          if item.last_read > 0 and item.last_read <= #current_toc then
+            current_chap = current_toc[item.last_read]
+          else
+            current_chap = current_toc[1]
+          end
+          cook_content(true)
+        end)
+      end
+    end,
+  })
 end
 
 return M

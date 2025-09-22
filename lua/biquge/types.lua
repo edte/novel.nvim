@@ -25,11 +25,19 @@
 ---@field line_index integer -- 行索引（在当前章节内容中的位置）
 ---@field timestamp integer -- 最后阅读时间戳
 ---
+---@class biquge.ReadingRecord
+---@field info biquge.Book
+---@field last_read integer
+---@field is_local? boolean
+---@field chapters? biquge.Chapter[]
+---@field reading_position? biquge.ReadingPosition
+
 ---@class biquge.Config
 ---@field width integer
 ---@field height integer
 ---@field hlgroup string
 ---@field bookshelf string
+---@field reading_history string -- 所有书籍阅读历史文件路径
 ---@field last_reading string -- 最后阅读记录文件路径
 ---@field picker "builtin"|"telescope"|"snacks"
 ---@field local_dir string -- 本地文件默认目录

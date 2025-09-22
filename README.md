@@ -27,8 +27,10 @@
 * 支持在线小说搜索
 * 支持本地 TXT 文件阅读
 * virtual text 显示小说内容，放心摸鱼
-* 支持收藏小说，收藏的小说将记录阅读进度（精度仅限章节）
+* 支持收藏小说，收藏的小说将记录阅读进度（精确到行）
 * 智能章节识别（支持多种标题格式）
+* **自动记录所有书籍的阅读位置**，无需收藏即可保存进度
+* 完整的阅读历史管理，支持查看和恢复任意书籍的阅读位置
 
 ## 依赖
 
@@ -50,12 +52,15 @@
         { '<Leader>b/', function() require('biquge').search() end, desc = 'Search online' },
         { '<Leader>bf', function() require('biquge').local_search() end, desc = 'Open local file' },
         { '<Leader>bd', function() require('biquge').local_browse() end, desc = 'Browse local directory' },
+        { '<Leader>bo', function() require('biquge').local_browse() end, desc = 'Open local file (browse)' },
         { '<Leader>bb', function() require('biquge').toggle() end, desc = 'Toggle' },
         { '<Leader>bt', function() require('biquge').toc() end, desc = 'Toc' },
         { '<Leader>bn', function() require('biquge').next_chap() end, desc = 'Next chapter' },
         { '<Leader>bp', function() require('biquge').prev_chap() end, desc = 'Previous chapter' },
         { '<Leader>bs', function() require('biquge').star() end, desc = 'Star current book' },
         { '<Leader>bl', function() require('biquge').bookshelf() end, desc = 'Bookshelf' },
+        { '<Leader>br', function() require('biquge').resume_last_reading() end, desc = 'Resume last reading' },
+        { '<Leader>bh', function() require('biquge').reading_history() end, desc = 'Reading history' },
         { '<M-d>', function() require('biquge').scroll(1) end, desc = 'Scroll down' },
         { '<M-u>', function() require('biquge').scroll(-1) end, desc = 'Scroll up' },
     },
@@ -98,6 +103,8 @@
 |    next_chap()   |              下一章节              |
 |    prev_chap()   |              上一章节              |
 |    bookshelf()   |              查看书架              |
+| resume_last_reading() |        恢复上次阅读位置        |
+| reading_history() |          查看所有阅读历史          |
 
 ### 本地文件支持
 
