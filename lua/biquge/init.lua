@@ -374,7 +374,7 @@ local function cook_content(restore_position)
         begin_index = math.min(pos.line_index, #current_content - config.height + 1)
         begin_index = math.max(1, begin_index)
         end_index = begin_index + config.height - 1
-        notify("已恢复到上次阅读位置 (第" .. pos.line_index .. "行)", vim.log.levels.INFO)
+        -- 已恢复到上次阅读位置
       else
         begin_index, end_index = 1, config.height
       end
@@ -431,7 +431,6 @@ function M.toggle()
   else
     -- 如果没有当前书籍，尝试恢复上次阅读的书籍
     if not current_book and last_book then
-      notify("正在恢复上次阅读的书籍...", vim.log.levels.INFO)
       M.resume_last_reading()
       return
     end
@@ -842,7 +841,7 @@ M.resume_last_reading = function()
     if #current_toc > 0 and last_book.last_read > 0 and last_book.last_read <= #current_toc then
       current_chap = current_toc[last_book.last_read]
       Async.run(function() cook_content(true) end)
-      notify("已恢复阅读: " .. current_book.title, vim.log.levels.INFO)
+      -- 已恢复阅读
     else
       notify("本地文件章节信息丢失", vim.log.levels.WARN)
     end
@@ -856,7 +855,7 @@ M.resume_last_reading = function()
       if last_book.last_read > 0 and last_book.last_read <= #current_toc then
         current_chap = current_toc[last_book.last_read]
         cook_content(true)
-        notify("已恢复阅读: " .. current_book.title, vim.log.levels.INFO)
+        -- 已恢复阅读
       else
         notify("章节信息已过期，请重新选择章节", vim.log.levels.WARN)
         M.toc()
