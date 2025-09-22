@@ -429,6 +429,12 @@ function M.toggle()
   if active then
     M.hide()
   else
+    -- 如果没有当前书籍，尝试恢复上次阅读的书籍
+    if not current_book and last_book then
+      notify("正在恢复上次阅读的书籍...", vim.log.levels.INFO)
+      M.resume_last_reading()
+      return
+    end
     M.show()
   end
 end
