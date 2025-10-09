@@ -469,7 +469,40 @@ function M.scroll(offset)
   end
 
   local step = offset < 0 and math.max(1 - begin_index, offset) or math.min(#current_content - end_index, offset)
+  
+  -- 边界处理：自动跳转章节
   if step == 0 then
+    if offset > 0 then
+      -- 向下滚动到底部 → 尝试跳转下一章
+      local current_index = current_chap_index()
+      if current_index > 0 and current_index < #current_toc then
+        current_chap = current_toc[current_index + 1]
+        Async.run(function() 
+          cook_content(false)
+          -- 跳转后从新章节开头开始显示
+          begin_index, end_index = 1, config.height
+          M.show()
+          save()
+        end)
+        return
+      end
+    else
+      -- 向上滚动到顶部 → 尝试跳转上一章  
+      local current_index = current_chap_index()
+      if current_index > 1 then
+        current_chap = current_toc[current_index - 1]
+        Async.run(function() 
+          cook_content(false)
+          -- 跳转后从新章节末尾开始显示
+          begin_index = math.max(1, #current_content - config.height + 1)
+          end_index = #current_content
+          M.show()
+          save()
+        end)
+        return
+      end
+    end
+    -- 如果无法跳转（已经是第一章/最后一章），则直接返回
     return
   end
 
